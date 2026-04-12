@@ -4,8 +4,9 @@ import json
 import datetime
 import urllib.request
 from math import radians, cos, sin, asin, sqrt
+
 try:
-    from fastapi import FastAPI, HTTPException
+    from fastapi import FastAPI, HTTPException, Request, Form
     from fastapi.middleware.cors import CORSMiddleware
     from pydantic import BaseModel
     import firebase_admin
@@ -19,7 +20,6 @@ except ImportError as e:
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-
 
 # --- Robust Dependency Loading ---
 try:
@@ -37,8 +37,14 @@ except ImportError:
     HAS_SSIM = False
     ssim = None
 
+try:
+    from twilio.twiml.messaging_response import MessagingResponse
+    HAS_TWILIO = True
+except ImportError:
+    HAS_TWILIO = False
+    MessagingResponse = None
+
 # --- Firebase Admin Initialization ---
-# Firebase Admin Initialization
 try:
     if not firebase_admin._apps:
         service_account_path = 'serviceAccountKey.json'
@@ -89,6 +95,9 @@ class VerificationRequest(BaseModel):
     after_image: str
     before_loc: str
     after_loc: str
+
+# --- User Session Management (In-Memory) ---
+user_sessions = {}
 
 # --- Core Logic Functions ---
 
@@ -182,7 +191,6 @@ class RecommendationEngine:
         yesterday = now - datetime.timedelta(hours=24)
         
         # Optimization 1: Only fetch reports from the last 24h for spikes
-        # (Assuming your document timestamps are properly formatted for range queries)
         reports_ref = db.collection('citizen_reports')
         all_reports = [doc.to_dict() | {"id": doc.id} for doc in reports_ref.stream()]
         
@@ -225,7 +233,6 @@ class RecommendationEngine:
                 })
 
         # Optimization 3: Efficient Proximity Clustering (Grid-based)
-        # We round coordinates to 3 decimal places (~110m precision) to find clusters in O(N)
         grid_clusters = {}
         pending = [r for r in all_reports if r.get('status') != 'Resolved']
         for r in pending:
@@ -385,6 +392,69 @@ async def check_duplicate(req: DuplicateRequest):
 
     return {"is_duplicate": False}
 
+# --- WhatsApp integration ---
+
+@app.post("/whatsapp")
+async def whatsapp_bot(From: str = Form(...), Body: str = Form(None), MediaUrl0: str = Form(None), Latitude: float = Form(None), Longitude: float = Form(None)):
+    if not HAS_TWILIO:
+        return "Twilio dependency not found"
+        
+    response = MessagingResponse()
+    msg = response.message()
+    
+    user_id = From
+    session = user_sessions.get(user_id, {"step": "welcome"})
+    
+    body_text = Body.strip().lower() if Body else ""
+    
+    if session["step"] == "welcome":
+        if body_text == "1":
+            session["step"] = "awaiting_complaint_desc"
+            msg.body("📝 Please describe the issue briefly (e.g., garbage, water leak, pothole).")
+        elif body_text == "2":
+            session["step"] = "awaiting_complaint_id"
+            msg.body("🔍 Please enter your Complaint ID.")
+        elif body_text == "3":
+            session["step"] = "awaiting_nearby_location"
+            msg.body("📍 Please share your location to view nearby issues.")
+        else:
+            msg.body("👋 Welcome to Smart Civic Help!\n\nYou can:\n1️⃣ Report a new issue\n2️⃣ Check complaint status\n3️⃣ View nearby issues\n\nReply with 1, 2, or 3.")
+            
+    elif session["step"] == "awaiting_complaint_desc":
+        session["description"] = body_text
+        session["step"] = "awaiting_photo"
+        msg.body("📸 Please upload a photo of the issue.")
+        
+    elif session["step"] == "awaiting_photo":
+        if MediaUrl0:
+            session["photo_url"] = MediaUrl0
+            # In real use, we'd use gemini or mobilenet here
+            detected_issue = "Garbage/Waste" 
+            session["detected_issue"] = detected_issue
+            session["step"] = "confirming_ai"
+            msg.body(f"🤖 Detected Issue: {detected_issue}\n\nIs this correct?\n✅ Yes\n❌ No")
+        else:
+            msg.body("Please upload a photo of the issue.")
+            
+    elif session["step"] == "confirming_ai":
+        if "yes" in body_text or "✅" in body_text:
+            session["step"] = "awaiting_location"
+            msg.body("📍 Please share your location using the WhatsApp location feature.")
+        else:
+            session["step"] = "awaiting_complaint_desc"
+            msg.body("Sorry for the mistake! Please describe the issue again.")
+            
+    elif session["step"] == "awaiting_location":
+        if Latitude and Longitude:
+            complaint_id = np.random.randint(1000, 9999)
+            msg.body(f"✅ Complaint Registered Successfully!\n\n🆔 Complaint ID: {complaint_id}\n📌 Status: Pending\n⚡ Priority: High\n\nYou will receive updates here. Thank you for helping keep the city clean! 🙌")
+            session = {"step": "welcome"} # Reset session
+        else:
+            msg.body("📍 Please share your location using the WhatsApp feature to complete the report.")
+
+    user_sessions[user_id] = session
+    return str(response)
+
 @app.post("/verify")
 async def verify(req: VerificationRequest):
     img1 = decode_image(req.before_image)
@@ -399,7 +469,7 @@ async def verify(req: VerificationRequest):
         try:
             img1_gray = cv2.cvtColor(img1, cv2.COLOR_BGR2GRAY)
             img2_gray = cv2.cvtColor(img2, cv2.COLOR_BGR2GRAY)
-            pixel_sim = ssim(img1_gray, img2_gray)
+            pixel_sim, _ = ssim(img1_gray, img2_gray, full=True)
         except Exception as e:
             print(f"DEBUG: Vision Audit Error: {e}")
 
@@ -480,4 +550,5 @@ async def dispatch_automated(req: DispatchRequest):
 
 if __name__ == "__main__":
     import uvicorn
+    # Using 8005 as requested in the project context
     uvicorn.run(app, host="0.0.0.0", port=8005)

@@ -5,3 +5,6 @@ scikit-image
 numpy
 python-multipart
 pydantic
+twilio
+google-generativeai
+mediapipe

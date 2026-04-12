@@ -147,18 +147,15 @@ export default function TrackComplaint() {
                   </div>
                 </div>
               </div>
-
               <div className="p-6 bg-[var(--input-bg)] rounded-2xl border border-[var(--border-color)] relative z-10">
                 <p className="text-text-secondary text-sm mb-2 font-semibold uppercase tracking-wider opacity-50">Description</p>
                 <p className="text-text-primary leading-relaxed">
                   "{result.description}"
                 </p>
               </div>
-
             </motion.div>
           )}
         </AnimatePresence>
-
       </div>
     </div>
   );
