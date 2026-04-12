@@ -8,3 +8,6 @@ pydantic
 twilio
 google-generativeai
 mediapipe
+apscheduler
+firebase-admin
+scikit-learn

@@ -12,10 +12,13 @@ try:
     import firebase_admin
     from firebase_admin import credentials, firestore
     from apscheduler.schedulers.background import BackgroundScheduler
+    HAS_APSCHEUDLER = True
     FASTAPI_AVAILABLE = True
 except ImportError as e:
     print(f"Warning: Missing critical dependency: {e}")
     FASTAPI_AVAILABLE = False
+    HAS_APSCHEUDLER = False
+    BackgroundScheduler = None
 
 import smtplib
 from email.mime.text import MIMEText
@@ -261,11 +264,14 @@ class RecommendationEngine:
             rec_col.add(rec)
 
 # --- Scheduler ---
-scheduler = BackgroundScheduler()
-scheduler.add_job(func=RecommendationEngine.analyze_patterns, trigger="interval", seconds=30)
-scheduler.start()
-# Trigger first run immediately
-RecommendationEngine.analyze_patterns()
+if HAS_APSCHEUDLER:
+    scheduler = BackgroundScheduler()
+    scheduler.add_job(func=RecommendationEngine.analyze_patterns, trigger="interval", seconds=30)
+    scheduler.start()
+    # Trigger first run immediately
+    RecommendationEngine.analyze_patterns()
+else:
+    print(">>> Warning: APScheduler not available. Background recommendation engine disabled.")
 
 @app.get("/admin/recommendations")
 async def get_recommendations():
