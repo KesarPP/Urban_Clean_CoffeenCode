@@ -4,6 +4,7 @@ import StatCard from './StatCard';
 import MapView from './MapView';
 import DataTable from './DataTable';
 import AdminEvents from './AdminEvents';
+import AdminNgoPanel from './AdminNgoPanel';
 import AdminDashboard from '../../pages/admin/AdminDashboard';
 import { ProfitChart, HourlyWasteChart, CaseDistributionPieChart } from './ChartPanels';
 
@@ -31,6 +32,7 @@ export default function DashboardLayout({ user, onLogout }) {
     { id: 'events', label: 'Events & Activities', icon: Calendar },
     { id: 'map', label: 'Live Map', icon: Map },
     { id: 'reports', label: 'Citizen Reports', icon: FileText },
+    { id: 'ngos', label: 'NGO Ops', icon: CheckCircle },
     { id: 'analytics', label: 'Analytics', icon: BarChart3 },
   ];
 
@@ -109,7 +111,14 @@ export default function DashboardLayout({ user, onLogout }) {
           </div>
         )}
 
-        {/* Tab 4: Analytics */}
+        {/* Tab 4: NGO Operations */}
+        {activeTab === 'ngos' && (
+          <div className="min-h-[75vh] animate-fade-in">
+            <AdminNgoPanel />
+          </div>
+        )}
+
+        {/* Tab 5: Analytics */}
         {activeTab === 'analytics' && (
           <div className="flex flex-col gap-8 animate-fade-in">
             {/* Top Stat Bar - Sync with Atlas */}

@@ -4,7 +4,7 @@ import { Camera, Loader2, Video, XCircle, Crosshair, Upload } from 'lucide-react
 import { MapContainer, TileLayer, Marker, useMapEvents } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
-import { collection, addDoc } from 'firebase/firestore';
+import { collection, addDoc, getDocs } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { useTheme } from '../context/ThemeContext';
 
@@ -46,6 +46,13 @@ const CATEGORIES = [
   { id: 'other', label: '⚠️ Other Issue' },
 ];
 
+const CATEGORY_TO_FOCUS = {
+  waste: 'Cleanliness',
+  water: 'Water',
+  pothole: 'Environment',
+  other: 'Public Health'
+};
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function ReportIssue() {
   const [position, setPosition] = useState(null);
@@ -53,6 +60,7 @@ export default function ReportIssue() {
   const [submitting, setSubmitting] = useState(false);
   const [cat, setCat] = useState('waste');
   const [desc, setDesc] = useState('');
+  const [areaName, setAreaName] = useState('');
   const { theme } = useTheme();
 
   // AI Tracking States
@@ -257,6 +265,53 @@ export default function ReportIssue() {
     analyzeImage();
   }, [capturedPhoto]);
 
+  // ── NGO auto-assignment (area + focus) ───────────────────────────────────
+  const findAutoAssignedNgo = async ({ areaInput, categoryId }) => {
+    const normalizedArea = (areaInput || '').toLowerCase().trim();
+    if (!normalizedArea) return null;
+
+    const targetFocus = CATEGORY_TO_FOCUS[categoryId] || null;
+
+    const [usersSnap, adoptionsSnap] = await Promise.all([
+      getDocs(collection(db, 'users')),
+      getDocs(collection(db, 'ngo_adoptions'))
+    ]);
+
+    const ngoMap = new Map();
+    usersSnap.forEach((entry) => {
+      const data = entry.data();
+      if (data.role === 'ngo' && data.ngo_verified) {
+        ngoMap.set(entry.id, { id: entry.id, ...data });
+      }
+    });
+
+    if (ngoMap.size === 0) return null;
+
+    const scored = new Map();
+    adoptionsSnap.forEach((entry) => {
+      const data = entry.data();
+      if (!ngoMap.has(data.ngo_id)) return;
+
+      const adoptedArea = (data.area_name || '').toLowerCase().trim();
+      if (!adoptedArea) return;
+
+      const isAreaMatch = normalizedArea.includes(adoptedArea) || adoptedArea.includes(normalizedArea);
+      if (!isAreaMatch) return;
+
+      const ngo = ngoMap.get(data.ngo_id);
+      const focusAreas = Array.isArray(ngo.ngo_focus_areas) ? ngo.ngo_focus_areas : [];
+      const isFocusMatch = !targetFocus || focusAreas.length === 0 || focusAreas.includes(targetFocus);
+      if (!isFocusMatch) return;
+
+      const prev = scored.get(ngo.id) || { score: 0, ngo };
+      const nextScore = prev.score + 1 + (targetFocus && focusAreas.includes(targetFocus) ? 1 : 0);
+      scored.set(ngo.id, { ngo, score: nextScore });
+    });
+
+    if (scored.size === 0) return null;
+    return [...scored.values()].sort((a, b) => b.score - a.score)[0].ngo;
+  };
+
   // ── Submit & AI Verification ──────────────────────────────────────────────
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -286,16 +341,26 @@ export default function ReportIssue() {
     }
 
     try {
-      // 2. Save final report
+      const autoNgo = await findAutoAssignedNgo({ areaInput: areaName, categoryId: cat });
       const docRef = await addDoc(collection(db, 'citizen_reports'), {
         title: CATEGORIES.find(c => c.id === cat)?.label ?? 'Issue',
         date: new Date().toLocaleString(),
-        status: 'Pending Review',
+        status: autoNgo ? 'In Progress' : 'Pending Review',
         description: desc || 'No description provided.',
+        area_name: areaName.trim() || 'Unspecified Area',
         location: position ? `${position.lat.toFixed(4)}, ${position.lng.toFixed(4)}` : 'Unknown',
         location_coords: position ? { lat: position.lat, lng: position.lng } : null,
         image_proof: finalPhoto,
         ai_analysis: aiData,
+        assigned_ngo_id: autoNgo ? autoNgo.id : null,
+        assigned_ngo_name: autoNgo ? (autoNgo.name || autoNgo.email || 'NGO') : null,
+        ngo_task_status: autoNgo ? 'Assigned' : null,
+        ngo_task: autoNgo ? {
+          status: 'Assigned',
+          assigned_at: new Date().toISOString(),
+          assigned_by: 'system-auto',
+          matching_basis: 'area+focus'
+        } : null,
         color: aiData.severity === 'HIGH' ? 'text-red-500' : 'text-accentYellow',
         bg: aiData.severity === 'HIGH' ? 'bg-red-500/10' : 'bg-accentYellow/10',
         border: aiData.severity === 'HIGH' ? 'border-red-500/20' : 'border-accentYellow/20',
@@ -327,6 +392,7 @@ export default function ReportIssue() {
 
       setCapturedPhoto(null);
       setDesc('');
+      setAreaName('');
     } catch (err) {
       console.error('Error adding document:', err);
       alert('Failed to submit report. Please try again.');
@@ -375,6 +441,16 @@ export default function ReportIssue() {
               value={desc} onChange={e => setDesc(e.target.value)} required rows={3}
               placeholder="Describe the incident…"
               style={{ width: '100%', boxSizing: 'border-box', background: 'var(--input-bg)', border: '1px solid var(--border-color)', borderRadius: 12, padding: '12px 14px', color: 'var(--text-primary)', resize: 'vertical', outline: 'none', fontSize: 14 }}
+            />
+          </div>
+
+          <div>
+            <label style={labelStyle}>Area / Landmark</label>
+            <input
+              value={areaName}
+              onChange={e => setAreaName(e.target.value)}
+              placeholder="e.g. Bandra Station Road"
+              style={{ width: '100%', boxSizing: 'border-box', background: 'var(--input-bg)', border: '1px solid var(--border-color)', borderRadius: 12, padding: '12px 14px', color: 'var(--text-primary)', outline: 'none', fontSize: 14 }}
             />
           </div>
 

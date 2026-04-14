@@ -9,12 +9,14 @@ import { auth, db } from '../firebase/config';
 export default function AuthPage({ setUser }) {
   const [searchParams] = useSearchParams();
   const initTab = searchParams.get('tab') === 'signup' ? 'signup' : 'login';
+  const initRole = searchParams.get('role') === 'ngo' ? 'ngo' : 'citizen';
   const [activeTab, setActiveTab] = useState(initTab);
   const navigate = useNavigate();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
+  const [signupRole, setSignupRole] = useState(initRole);
   const [error, setError] = useState('');
 
   const handleAuth = async (e) => {
@@ -40,7 +42,7 @@ export default function AuthPage({ setUser }) {
           console.warn("Could not fetch user role from Firestore, defaulting to citizen:", e);
         }
         
-        setUser({ role, name: displayName || 'Citizen', email: user.email });
+        setUser({ uid: user.uid, role, name: displayName || 'Citizen', email: user.email });
         navigate(`/${role}/dashboard`);
       } else {
         if (email && password && name) {
@@ -52,15 +54,19 @@ export default function AuthPage({ setUser }) {
             await setDoc(doc(db, 'users', user.uid), {
               name: name,
               email: user.email,
-              role: 'citizen',
+              role: signupRole,
+              ngo_verified: signupRole === 'ngo' ? false : null,
+              ngo_description: signupRole === 'ngo' ? '' : null,
+              ngo_focus_areas: signupRole === 'ngo' ? [] : null,
+              ngo_coverage: signupRole === 'ngo' ? '' : null,
               createdAt: new Date().toISOString()
             });
           } catch (e) {
             console.warn("Could not save user profile to Firestore:", e);
           }
 
-          setUser({ role: 'citizen', name: name, email: user.email });
-          navigate('/citizen/dashboard');
+          setUser({ uid: user.uid, role: signupRole, name: name, email: user.email });
+          navigate(`/${signupRole}/dashboard`);
         } else {
           setError('Please fill in all fields.');
         }
@@ -152,6 +158,20 @@ export default function AuthPage({ setUser }) {
                 />
               </div>
             </div>
+
+            {activeTab === 'signup' && (
+              <div>
+                <label className="block text-sm font-medium text-text-secondary mb-1.5">Account Type</label>
+                <select
+                  value={signupRole}
+                  onChange={(e) => setSignupRole(e.target.value)}
+                  className="w-full bg-[var(--input-bg)] border border-[var(--border-color)] rounded-xl py-3 px-4 text-text-primary focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-all"
+                >
+                  <option value="citizen">Citizen</option>
+                  <option value="ngo">NGO</option>
+                </select>
+              </div>
+            )}
 
             <button type="submit" className="w-full py-3.5 bg-primary hover:bg-blue-600 text-white rounded-xl font-semibold flex items-center justify-center gap-2 transition-all glow-primary">
               {activeTab === 'login' ? 'Sign In' : 'Create Account'} <ArrowRight className="h-4 w-4" />

@@ -18,6 +18,8 @@ import CitizenDashboard from './pages/citizen/CitizenDashboard';
 import Activities from './pages/citizen/Activities';
 import TrackComplaint from './pages/citizen/TrackComplaint';
 import EducationHub from './pages/citizen/EducationHub';
+import NgoDashboard from './pages/ngo/NgoDashboard';
+import NgoProfile from './pages/ngo/NgoProfile';
 import { useTheme } from './context/ThemeContext';
 import { Sun, Moon, Loader2 } from 'lucide-react';
 
@@ -37,10 +39,11 @@ function FloatingThemeToggle() {
 
 // Secure Route Guard
 function ProtectedRoute({ user, role, children }) {
-  if (!user) return <Navigate to={role === 'admin' ? '/admin-login' : '/auth'} replace />;
-  if (user.role !== role) {
+  const allowedRoles = Array.isArray(role) ? role : [role];
+  if (!user) return <Navigate to={allowedRoles.includes('admin') ? '/admin-login' : '/auth'} replace />;
+  if (!allowedRoles.includes(user.role)) {
     // Prevent citizens from accessing admin, and vice versa
-    return <Navigate to={user.role === 'admin' ? '/admin/dashboard' : '/citizen/dashboard'} replace />;
+    return <Navigate to={`/${user.role}/dashboard`} replace />;
   }
   return children;
 }
@@ -82,6 +85,24 @@ function AdminApp({ user, onLogout }) {
   );
 }
 
+function NgoApp({ user, onLogout }) {
+  return (
+    <ProtectedRoute user={user} role="ngo">
+      <div className="min-h-screen flex flex-col pt-16">
+        <Navbar user={user} onLogout={onLogout} />
+        <main className="flex-grow">
+          <Routes>
+            <Route path="dashboard" element={<NgoDashboard user={user} />} />
+            <Route path="profile" element={<NgoProfile user={user} />} />
+            <Route path="*" element={<Navigate to="dashboard" />} />
+          </Routes>
+        </main>
+        <Footer />
+      </div>
+    </ProtectedRoute>
+  );
+}
+
 export default function App() {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -94,6 +115,7 @@ export default function App() {
           const role = userDoc.exists() ? userDoc.data().role : 'citizen';
           const name = userDoc.exists() ? userDoc.data().name : firebaseUser.displayName;
           setUser({ 
+            uid: firebaseUser.uid,
             role, 
             name: name || (role === 'admin' ? 'System Admin' : 'Citizen'), 
             email: firebaseUser.email,
@@ -101,7 +123,7 @@ export default function App() {
           });
         } catch (error) {
           console.warn("Error fetching user data from Firestore (defaulting to citizen):", error);
-          setUser({ role: 'citizen', name: firebaseUser.displayName || 'Citizen', email: firebaseUser.email });
+          setUser({ uid: firebaseUser.uid, role: 'citizen', name: firebaseUser.displayName || 'Citizen', email: firebaseUser.email });
         }
       } else {
         setUser(null);
@@ -165,6 +187,7 @@ export default function App() {
       {/* Role-Based Secure Portals */}
       <Route path="/citizen/*" element={<CitizenApp user={user} onLogout={handleLogout} />} />
       <Route path="/admin/*" element={<AdminApp user={user} onLogout={handleLogout} />} />
+      <Route path="/ngo/*" element={<NgoApp user={user} onLogout={handleLogout} />} />
       
       {/* Catch-all redirect */}
       <Route path="*" element={<Navigate to="/" replace />} />

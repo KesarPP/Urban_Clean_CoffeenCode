@@ -10,6 +10,10 @@ export default function Navbar({ user, onLogout, isAdminLogin }) {
 
   const navLinks = isAdminLogin ? [
     { name: 'Home', path: '/' },
+  ] : user?.role === 'ngo' ? [
+    { name: 'Command Center', path: '/ngo/dashboard' },
+    { name: 'Profile', path: '/ngo/profile' },
+    { name: 'Track', path: '/track' },
   ] : user ? [
     { name: 'Dashboard', path: '/citizen/dashboard' },
     { name: 'Education', path: '/citizen/education' },

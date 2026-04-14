@@ -50,7 +50,7 @@ export default function Hero() {
           variants={containerVariants}
           initial="hidden"
           animate="visible"
-          className="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-5xl mx-auto"
+          className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 max-w-6xl mx-auto"
         >
           {/* Citizen Path */}
           <motion.div variants={itemVariants}>
@@ -69,6 +69,29 @@ export default function Hero() {
                   </p>
                   <div className="inline-flex items-center gap-2 text-accent-green font-black group-hover:gap-4 transition-all uppercase tracking-wider text-sm">
                     Access as Citizen <ArrowRight size={20} />
+                  </div>
+                </div>
+              </div>
+            </Link>
+          </motion.div>
+
+          {/* NGO Path */}
+          <motion.div variants={itemVariants}>
+            <Link to="/auth?tab=signup&role=ngo" className="group block h-full">
+              <div className="glass-emerald p-8 md:p-10 rounded-[2.5rem] h-full transition-all duration-500 hover:scale-[1.02] hover:shadow-glow-green relative overflow-hidden bg-[var(--card-bg)]/40 border border-[var(--border-color)]">
+                <div className="absolute top-0 right-0 p-8 opacity-5 group-hover:opacity-10 transition-opacity">
+                  <Leaf size={120} className="text-emerald-400" />
+                </div>
+                <div className="relative z-10">
+                  <div className="w-14 h-14 bg-emerald-500/20 rounded-2xl flex items-center justify-center mb-8 border border-emerald-500/30 shadow-inner">
+                    <Leaf className="text-emerald-400" size={28} />
+                  </div>
+                  <h2 className="text-3xl font-black mb-4 text-text-primary group-hover:text-emerald-400 transition-colors">NGO Portal</h2>
+                  <p className="text-text-secondary text-lg mb-8 leading-relaxed">
+                    Adopt public areas, collaborate with officials, and resolve complaints faster in your coverage zones.
+                  </p>
+                  <div className="inline-flex items-center gap-2 text-emerald-400 font-black group-hover:gap-4 transition-all uppercase tracking-wider text-sm">
+                    Join as NGO <ArrowRight size={20} />
                   </div>
                 </div>
               </div>
