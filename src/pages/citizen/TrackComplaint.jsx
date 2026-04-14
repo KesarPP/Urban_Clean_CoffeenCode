@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Link } from 'react-router-dom';
 import { doc, getDoc, collection, getDocs } from 'firebase/firestore';
 import { db } from '../../firebase/config';
+import WhatsAppFloatingButton from '../../components/WhatsAppFloatingButton';
 
 export default function TrackComplaint() {
   const [trackingId, setTrackingId] = useState('');
@@ -156,6 +157,9 @@ export default function TrackComplaint() {
             </motion.div>
           )}
         </AnimatePresence>
+
+        {/* WhatsApp Floating Button */}
+        <WhatsAppFloatingButton />
       </div>
     </div>
   );

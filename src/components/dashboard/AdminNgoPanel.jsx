@@ -1,7 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
-import { collection, doc, onSnapshot, updateDoc } from 'firebase/firestore';
+import { collection, doc, onSnapshot, updateDoc, query, where } from 'firebase/firestore';
 import { db } from '../../firebase/config';
-import { BadgeCheck, UserCheck, Handshake } from 'lucide-react';
+import {
+  BadgeCheck,
+  UserCheck,
+  Handshake,
+} from 'lucide-react';
 
 function normalize(value) {
   return (value || '').toLowerCase().trim();
@@ -13,13 +17,12 @@ export default function AdminNgoPanel() {
   const [selectedNgo, setSelectedNgo] = useState({});
 
   useEffect(() => {
-    const unsubUsers = onSnapshot(collection(db, 'users'), (snapshot) => {
+    // Optimized query to only fetch users with role 'ngo'
+    const ngoQuery = query(collection(db, 'users'), where('role', '==', 'ngo'));
+    const unsubUsers = onSnapshot(ngoQuery, (snapshot) => {
       const list = [];
       snapshot.forEach((entry) => {
-        const data = entry.data();
-        if (data.role === 'ngo') {
-          list.push({ id: entry.id, ...data });
-        }
+        list.push({ id: entry.id, ...entry.data() });
       });
       setNgos(list);
     });
@@ -81,8 +84,11 @@ export default function AdminNgoPanel() {
 
   return (
     <div className="space-y-6 animate-fade-in">
+      {/* NGO Verification Section */}
       <div className="glass-card rounded-2xl p-5 border border-[var(--border-color)]">
-        <h3 className="font-bold text-lg text-text-primary flex items-center gap-2"><BadgeCheck size={18} /> NGO Verification</h3>
+        <h3 className="font-bold text-lg text-text-primary flex items-center gap-2">
+          <BadgeCheck size={18} /> NGO Verification
+        </h3>
         <div className="mt-4 space-y-3">
           {ngos.length === 0 && <p className="text-sm text-text-secondary">No NGO accounts found yet.</p>}
           {ngos.map((ngo) => (
@@ -90,12 +96,17 @@ export default function AdminNgoPanel() {
               <div>
                 <p className="font-semibold text-text-primary">{ngo.name || 'Unnamed NGO'}</p>
                 <p className="text-xs text-text-secondary">{ngo.email || 'No email'} • {ngo.ngo_coverage || 'Coverage not set'}</p>
-                <p className="text-xs text-text-secondary mt-1">Focus: {Array.isArray(ngo.ngo_focus_areas) && ngo.ngo_focus_areas.length ? ngo.ngo_focus_areas.join(', ') : 'Not set'}</p>
+                <p className="text-xs text-text-secondary mt-1">
+                  Focus: {Array.isArray(ngo.ngo_focus_areas) && ngo.ngo_focus_areas.length ? ngo.ngo_focus_areas.join(', ') : 'Not set'}
+                </p>
               </div>
               <button
                 type="button"
                 onClick={() => toggleVerification(ngo)}
-                className={`px-3 py-1.5 rounded-lg text-sm font-semibold ${ngo.ngo_verified ? 'bg-emerald-600 text-white' : 'bg-amber-500/20 text-amber-500 border border-amber-500/30'}`}
+                className={`px-3 py-1.5 rounded-lg text-sm font-semibold transition-colors ${ngo.ngo_verified
+                  ? 'bg-emerald-600 text-white'
+                  : 'bg-amber-500/20 text-amber-500 border border-amber-500/30 hover:bg-amber-500/30'
+                  }`}
               >
                 {ngo.ngo_verified ? 'Verified' : 'Verify NGO'}
               </button>
@@ -104,8 +115,11 @@ export default function AdminNgoPanel() {
         </div>
       </div>
 
+      {/* Manual Assignment Section */}
       <div className="glass-card rounded-2xl p-5 border border-[var(--border-color)]">
-        <h3 className="font-bold text-lg text-text-primary flex items-center gap-2"><Handshake size={18} /> Manual Complaint Assignment</h3>
+        <h3 className="font-bold text-lg text-text-primary flex items-center gap-2">
+          <Handshake size={18} /> Manual Complaint Assignment
+        </h3>
         <div className="mt-4 space-y-3">
           {pendingReports.length === 0 && <p className="text-sm text-text-secondary">No active complaints available for assignment.</p>}
           {pendingReports.map((report) => {
@@ -114,17 +128,19 @@ export default function AdminNgoPanel() {
               <div key={report.id} className="p-3 rounded-xl border border-[var(--border-color)] bg-[var(--input-bg)] grid grid-cols-1 lg:grid-cols-[2fr_1fr_auto] gap-3 items-center">
                 <div>
                   <p className="font-semibold text-text-primary">{report.title || 'Untitled Complaint'}</p>
-                  <p className="text-xs text-text-secondary">Area: {report.area_name || report.location || 'Unknown'} • Current: {report.assigned_ngo_name || 'Unassigned'}</p>
+                  <p className="text-xs text-text-secondary">
+                    Area: {report.area_name || report.location || 'Unknown'} • Current: {report.assigned_ngo_name || 'Unassigned'}
+                  </p>
                 </div>
                 <select
                   value={selectedNgo[report.id] || ''}
-                  onChange={(e) => setSelectedNgo((prev) => ({ ...prev, [report.id]: e.target.value }))}
+                  onChange={(e) => setSelectedNgo(prev => ({ ...prev, [report.id]: e.target.value }))}
                   className="px-3 py-2 rounded-lg bg-[var(--card-bg)] border border-[var(--border-color)] text-sm"
                 >
                   <option value="">Select NGO</option>
                   {ngos.map((ngo) => (
                     <option key={ngo.id} value={ngo.id}>
-                      {ngo.name || ngo.email || ngo.id}
+                      {ngo.name || ngo.email}
                       {areaText && normalize(ngo.ngo_coverage || '').includes(areaText) ? ' (coverage match)' : ''}
                     </option>
                   ))}
@@ -132,7 +148,7 @@ export default function AdminNgoPanel() {
                 <button
                   type="button"
                   onClick={() => assignReport(report)}
-                  className="px-4 py-2 rounded-lg bg-primary text-white text-sm font-semibold inline-flex items-center gap-2"
+                  className="px-4 py-2 rounded-lg bg-primary text-white text-sm font-semibold inline-flex items-center gap-2 hover:opacity-90 transition-opacity"
                 >
                   <UserCheck size={14} /> Assign
                 </button>

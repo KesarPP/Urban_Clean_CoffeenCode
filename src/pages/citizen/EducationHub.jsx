@@ -2,6 +2,7 @@ import { motion } from 'framer-motion';
 import { Leaf, Trash2, Recycle, MapPin, CheckCircle2, AlertCircle, Info, ArrowRight, Droplets, Wind, Sun, Box } from 'lucide-react';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
+import WhatsAppFloatingButton from '../../components/WhatsAppFloatingButton';
 
 const SegregationCard = ({ title, items, color, icon: Icon, description }) => (
   <motion.div 
@@ -235,6 +236,9 @@ export default function EducationHub() {
            </Link>
         </div>
       </motion.div>
+
+      {/* WhatsApp Floating Button */}
+      <WhatsAppFloatingButton />
     </div>
   );
 }

@@ -4,6 +4,7 @@ import { motion } from 'framer-motion';
 import { Link } from 'react-router-dom';
 import { collection, query, orderBy, getDocs } from 'firebase/firestore';
 import { db } from '../../firebase/config';
+import WhatsAppFloatingButton from '../../components/WhatsAppFloatingButton';
 
 export default function CitizenDashboard() {
   const [reports, setReports] = useState([]);
@@ -157,6 +158,9 @@ export default function CitizenDashboard() {
           )}
         </div>
       )}
+
+      {/* WhatsApp Floating Button */}
+      <WhatsAppFloatingButton />
     </div>
   );
 }

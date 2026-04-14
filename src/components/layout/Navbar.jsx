@@ -12,6 +12,7 @@ export default function Navbar({ user, onLogout, isAdminLogin }) {
     { name: 'Home', path: '/' },
   ] : user?.role === 'ngo' ? [
     { name: 'Command Center', path: '/ngo/dashboard' },
+    { name: 'Events', path: '/ngo/events' },
     { name: 'Profile', path: '/ngo/profile' },
     { name: 'Track', path: '/track' },
   ] : user ? [

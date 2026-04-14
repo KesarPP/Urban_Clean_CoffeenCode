@@ -5,6 +5,7 @@ import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import { motion } from 'framer-motion';
 import { Calendar, MapPin, Users, Navigation, HeartHandshake, Waves, Loader2 } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
+import WhatsAppFloatingButton from '../../components/WhatsAppFloatingButton';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 
@@ -49,10 +50,9 @@ export default function Activities() {
   useEffect(() => {
     const q = query(collection(db, 'activities'), orderBy('createdAt', 'desc'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const activitiesData = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
+      const activitiesData = snapshot.docs
+        .map(doc => ({ id: doc.id, ...doc.data() }))
+        .filter(a => !a.approval_status || a.approval_status === 'approved');
       setActivities(activitiesData);
       setLoading(false);
     }, (err) => {
@@ -225,6 +225,9 @@ export default function Activities() {
         </div>
 
       </div>
+
+      {/* WhatsApp Floating Button */}
+      <WhatsAppFloatingButton />
     </div>
   );
 }

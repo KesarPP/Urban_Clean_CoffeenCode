@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
-import { LayoutDashboard, Map, FileText, BarChart3, LogOut, Calendar, Trash2, Droplets, AlertTriangle, CheckCircle, Sun, Moon } from 'lucide-react';
+import { LayoutDashboard, FileText, BarChart3, LogOut, Calendar, Trash2, Droplets, AlertTriangle, CheckCircle, Sun, Moon } from 'lucide-react';
 import StatCard from './StatCard';
-import MapView from './MapView';
+
 import DataTable from './DataTable';
 import AdminEvents from './AdminEvents';
 import AdminNgoPanel from './AdminNgoPanel';
@@ -30,7 +30,7 @@ export default function DashboardLayout({ user, onLogout }) {
   const tabs = [
     { id: 'overview', label: 'Overview', icon: LayoutDashboard },
     { id: 'events', label: 'Events & Activities', icon: Calendar },
-    { id: 'map', label: 'Live Map', icon: Map },
+
     { id: 'reports', label: 'Citizen Reports', icon: FileText },
     { id: 'ngos', label: 'NGO Ops', icon: CheckCircle },
     { id: 'analytics', label: 'Analytics', icon: BarChart3 },
@@ -97,12 +97,7 @@ export default function DashboardLayout({ user, onLogout }) {
           </div>
         )}
 
-        {/* Tab 2: Live Map */}
-        {activeTab === 'map' && (
-          <div className="h-[75vh] w-full animate-fade-in">
-            <MapView spanClass="h-full w-full rounded-2xl shadow-sm" />
-          </div>
-        )}
+
 
         {/* Tab 3: Citizen Reports */}
         {activeTab === 'reports' && (

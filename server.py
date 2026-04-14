@@ -4,10 +4,21 @@ import json
 import datetime
 import urllib.request
 from math import radians, cos, sin, asin, sqrt
+import sys
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
+
+# --- Fix for Windows Console Emoji Support ---
+if sys.platform == "win32":
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
 try:
     from fastapi import FastAPI, HTTPException, Request, Form
     from fastapi.middleware.cors import CORSMiddleware
+    from fastapi.responses import Response
     from pydantic import BaseModel
     import firebase_admin
     from firebase_admin import credentials, firestore
@@ -42,10 +53,70 @@ except ImportError:
 
 try:
     from twilio.twiml.messaging_response import MessagingResponse
+    from twilio.rest import Client as TwilioClient
     HAS_TWILIO = True
 except ImportError:
     HAS_TWILIO = False
     MessagingResponse = None
+    TwilioClient = None
+
+# --- Twilio Client Initialization ---
+TWILIO_ACCOUNT_SID = os.environ.get("TWILIO_ACCOUNT_SID", "")
+TWILIO_AUTH_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN", "")
+TWILIO_WHATSAPP_NUMBER = os.environ.get("TWILIO_WHATSAPP_NUMBER", "+14155238886")
+
+try:
+    if HAS_TWILIO and TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN:
+        twilio_client = TwilioClient(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+        print(f"[OK] Twilio Client Initialized Successfully")
+        print(f"[INFO] WhatsApp Number: {TWILIO_WHATSAPP_NUMBER}")
+    else:
+        twilio_client = None
+        if not HAS_TWILIO:
+            print("⚠️ Twilio library not installed")
+        else:
+            print("⚠️ Twilio credentials not configured")
+except Exception as e:
+    print(f"[ERROR] Twilio Client Error: {e}")
+    twilio_client = None
+
+# --- Mock Firestore for Local Simulation ---
+class MockFirestore:
+    def __init__(self):
+        self._data = {}
+    def collection(self, name):
+        if name not in self._data: self._data[name] = {}
+        return MockCollection(self._data[name], name)
+
+class MockCollection:
+    def __init__(self, data, name):
+        self._data = data
+        self._name = name
+    def add(self, doc):
+        import uuid
+        doc_id = str(uuid.uuid4())
+        self._data[doc_id] = doc
+        return (None, MockDocRef(doc_id, doc))
+    def document(self, doc_id):
+        return MockDocRef(doc_id, self._data.get(doc_id))
+    def where(self, *args, **kwargs): return self  # Simplified where
+    def order_by(self, *args, **kwargs): return self
+    def limit(self, *args, **kwargs): return self
+    def stream(self):
+        return [MockDoc(k, v) for k, v in self._data.items()]
+
+class MockDocRef:
+    def __init__(self, id, data=None):
+        self.id = id
+        self._data = data
+    def get(self): return MockDoc(self.id, self._data)
+
+class MockDoc:
+    def __init__(self, id, data):
+        self.id = id
+        self.exists = data is not None
+        self._data = data
+    def to_dict(self): return self._data
 
 # --- Firebase Admin Initialization ---
 try:
@@ -62,7 +133,8 @@ try:
     db = firestore.client()
 except Exception as e:
     print(f">>> CAUTION: {e}")
-    db = None
+    print(">>> FALLBACK: Using MockFirestore simulation for local development.")
+    db = MockFirestore()
 
 # --- Model setup ---
 try:
@@ -77,8 +149,8 @@ try:
     g_api_key = os.getenv("GOOGLE_API_KEY")
     if g_api_key:
         genai.configure(api_key=g_api_key)
-        # Using Gemini 1.5 Pro for advanced forensic reasoning
-        gemini_model = genai.GenerativeModel('gemini-1.5-pro')
+        # Using Gemini 2.0 Flash (Preview) as requested for high-speed analysis
+        gemini_model = genai.GenerativeModel('gemini-2.0-flash-exp')
     else:
         gemini_model = None
 except ImportError:
@@ -400,66 +472,589 @@ async def check_duplicate(req: DuplicateRequest):
 
 # --- WhatsApp integration ---
 
+def extract_whatsapp_number(phone_from):
+    """Extract clean phone number from Twilio format"""
+    return phone_from.replace("whatsapp:", "").replace("whatsapp+", "+") if phone_from else phone_from
+
+def get_issue_categories():
+    """Return available issue categories"""
+    return {
+        "1": "🗑️ Garbage/Waste",
+        "2": "💧 Water Leak",
+        "3": "🕳️ Pothole/Road Damage",
+        "4": "🌳 Parks & Green Space",
+        "5": "💡 Street Light",
+        "6": "🚗 Traffic/Parking",
+        "7": "🔧 Other"
+    }
+
+async def create_whatsapp_complaint(user_data):
+    """Save complaint to Firestore"""
+    if not db:
+        return {"error": "Database offline", "complaint_id": None}
+    
+    try:
+        complaint_doc = {
+            "phone": user_data.get("phone"),
+            "description": user_data.get("description"),
+            "category": user_data.get("category"),
+            "issue_type": user_data.get("issue_type"),
+            "photo_url": user_data.get("photo_url"),
+            "location_coords": {
+                "lat": user_data.get("latitude"),
+                "lng": user_data.get("longitude")
+            },
+            "location_address": user_data.get("location_address", "Unknown"),
+            "status": "Pending",
+            "source": "WhatsApp",
+            "created_at": datetime.datetime.now(datetime.timezone.utc),
+            "verified": False
+        }
+        doc_ref = db.collection('whatsapp_complaints').add(complaint_doc)
+        complaint_id = doc_ref[1].id
+        return {"success": True, "complaint_id": complaint_id}
+    except Exception as e:
+        print(f"Error creating complaint: {e}")
+        return {"error": str(e), "complaint_id": None}
+
+async def get_nearby_issues(latitude, longitude, radius_km=5):
+    """Fetch issues near user location"""
+    if not db:
+        return []
+    
+    try:
+        # Get all pending/active complaints
+        reports_ref = db.collection('whatsapp_complaints')
+        query = reports_ref.where('status', 'in', ['Pending', 'In Progress'])
+        docs = query.stream()
+        
+        nearby = []
+        for doc in docs:
+            data = doc.to_dict()
+            coords = data.get('location_coords', {})
+            if coords.get('lat') and coords.get('lng'):
+                dist = calculate_distance(
+                    {"lat": latitude, "lng": longitude},
+                    coords
+                )
+                if dist <= radius_km * 1000:  # Convert km to meters
+                    nearby.append({
+                        "id": doc.id,
+                        "type": data.get('issue_type', 'Unknown'),
+                        "distance_m": round(dist),
+                        "status": data.get('status'),
+                        "category": data.get('category'),
+                        "upvotes": data.get('upvotes', 0)
+                    })
+        
+        # Sort by distance
+        nearby.sort(key=lambda x: x['distance_m'])
+        return nearby[:5]  # Return top 5 nearest
+    except Exception as e:
+        print(f"Error fetching nearby issues: {e}")
+        return []
+
+async def get_complaint_status(complaint_id):
+    """Fetch complaint status from Firestore"""
+    if not db:
+        return {"error": "Database offline", "status": None}
+    
+    try:
+        doc = db.collection('whatsapp_complaints').document(complaint_id).get()
+        if doc.exists:
+            data = doc.to_dict()
+            return {
+                "success": True,
+                "status": data.get('status'),
+                "category": data.get('category'),
+                "created_at": data.get('created_at'),
+                "updates": data.get('updates', [])
+            }
+        else:
+            return {"error": "Complaint not found", "status": None}
+    except Exception as e:
+        return {"error": str(e), "status": None}
+
+async def send_whatsapp_message(to_phone, message):
+    """Send outbound WhatsApp message via Twilio"""
+    if not twilio_client:
+        print(f"⚠️ Twilio client not available. Would send to {to_phone}: {message}")
+        return False
+    
+    try:
+        # Format phone number for WhatsApp
+        to_number = f"whatsapp:{to_phone}" if not to_phone.startswith("whatsapp:") else to_phone
+        from_number = f"whatsapp:{TWILIO_WHATSAPP_NUMBER}"
+        
+        message = twilio_client.messages.create(
+            from_=from_number,
+            to=to_number,
+            body=message
+        )
+        print(f"✅ WhatsApp message sent to {to_phone}")
+        return True
+    except Exception as e:
+        print(f"❌ Error sending WhatsApp message: {e}")
+        return False
+
 @app.post("/whatsapp")
 async def whatsapp_bot(From: str = Form(...), Body: str = Form(None), MediaUrl0: str = Form(None), Latitude: float = Form(None), Longitude: float = Form(None)):
     if not HAS_TWILIO:
         return "Twilio dependency not found"
-        
+    
+    from twilio.rest import Client
+    
     response = MessagingResponse()
     msg = response.message()
     
+    user_phone = extract_whatsapp_number(From)
+    print(f"\n📲 [WhatsApp Inbound] From: {From} ({user_phone}), Body: '{Body}'")
+    
     user_id = From
     session = user_sessions.get(user_id, {"step": "welcome"})
-    
     body_text = Body.strip().lower() if Body else ""
+    print(f"🔄 [Session] Current Step: {session['step']}")
     
-    if session["step"] == "welcome":
+    # ============ WELCOME MENU ============
+    if session["step"] == "welcome" or body_text in ["hi", "hello", "menu", "start", "help"]:
+        session["step"] = "welcome" # Reset if they sent help
         if body_text == "1":
-            session["step"] = "awaiting_complaint_desc"
-            msg.body("📝 Please describe the issue briefly (e.g., garbage, water leak, pothole).")
+            session["step"] = "select_category"
+            categories = get_issue_categories()
+            category_menu = "\n".join([f"*{k}* - {v}" for k, v in categories.items()])
+            msg.body(
+                f"📋 *Select Issue Category*\n\n"
+                f"Please reply with the number corresponding to the issue:\n\n"
+                f"{category_menu}\n\n"
+                f"Type *0* to return to the Main Menu."
+            )
         elif body_text == "2":
             session["step"] = "awaiting_complaint_id"
-            msg.body("🔍 Please enter your Complaint ID.")
+            msg.body("🔍 *Check Complaint Status*\n\nPlease enter your *Complaint ID* (e.g., abc12345):\n\nType *0* to return to the Main Menu.")
         elif body_text == "3":
             session["step"] = "awaiting_nearby_location"
-            msg.body("📍 Please share your location to view nearby issues.")
+            msg.body(
+                "📍 *View Nearby Issues*\n\nPlease share your *Live Location* to see issues reported near you.\n\n"
+                "💡 *How to share location:*\n"
+                "1. Tap the plus (+/📎) icon\n"
+                "2. Select 'Location'\n"
+                "3. Tap 'Share Live Location' or 'Send Your Current Location'\n\n"
+                "Type *0* to return to the Main Menu."
+            )
         else:
-            msg.body("👋 Welcome to Smart Civic Help!\n\nYou can:\n1️⃣ Report a new issue\n2️⃣ Check complaint status\n3️⃣ View nearby issues\n\nReply with 1, 2, or 3.")
-            
+            msg.body(
+                f"👋 *Welcome to Urban Clean - Smart Civic Help!*\n\n"
+                f"I am your automated assistant for keeping the city clean. 🌍\n\n"
+                f"How can I help you today?\n\n"
+                f"1️⃣ *Report* a new issue\n"
+                f"2️⃣ *Track* complaint status\n"
+                f"3️⃣ *View* nearby issues\n\n"
+                f"Reply with *1*, *2*, or *3*"
+            )
+    
+    # ============ COMPLAINT REGISTRATION FLOW ============
+    elif session["step"] == "select_category":
+        if body_text == "0":
+            session = {"step": "welcome"}
+            msg.body("Returned to Main Menu. How can I help you?\n\n1️⃣ Report Issue\n2️⃣ Track Status\n3️⃣ View Nearby")
+        else:
+            categories = get_issue_categories()
+            if body_text in categories:
+                session["category"] = body_text
+                session["issue_type"] = categories[body_text]
+                session["step"] = "awaiting_complaint_desc"
+                msg.body(
+                    f"✅ *Category Selected:* {categories[body_text]}\n\n"
+                    f"📝 *Description*\n"
+                    f"Please describe the issue briefly (e.g., 'Large garbage pile at the park').\n\n"
+                    f"Type *0* to cancel and return to menu."
+                )
+            else:
+                msg.body("❌ *Invalid Selection*\n\nPlease reply with a number between 1 and 7, or *0* for the main menu.")
+    
     elif session["step"] == "awaiting_complaint_desc":
-        session["description"] = body_text
-        session["step"] = "awaiting_photo"
-        msg.body("📸 Please upload a photo of the issue.")
-        
+        if body_text == "0":
+            session = {"step": "welcome"}
+            msg.body("Cancelled. Returned to Main Menu.\n\n1️⃣ Report Issue\n2️⃣ Track Status\n3️⃣ View Nearby")
+        else:
+            session["description"] = Body if Body else ""
+            session["step"] = "awaiting_photo"
+            msg.body(
+                f"📸 *Upload Photo*\n\n"
+                f"Please take a photo of the issue and send it here.\n\n"
+                f"💡 *Tip:* Good photos help us resolve issues faster!\n\n"
+                f"Type *0* to cancel."
+            )
+    
     elif session["step"] == "awaiting_photo":
-        if MediaUrl0:
+        if body_text == "0":
+            session = {"step": "welcome"}
+            msg.body("Cancelled. Returned to Main Menu.")
+        elif MediaUrl0:
             session["photo_url"] = MediaUrl0
-            # In real use, we'd use gemini or mobilenet here
-            detected_issue = "Garbage/Waste" 
-            session["detected_issue"] = detected_issue
-            session["step"] = "confirming_ai"
-            msg.body(f"🤖 Detected Issue: {detected_issue}\n\nIs this correct?\n✅ Yes\n❌ No")
-        else:
-            msg.body("Please upload a photo of the issue.")
-            
-    elif session["step"] == "confirming_ai":
-        if "yes" in body_text or "✅" in body_text:
             session["step"] = "awaiting_location"
-            msg.body("📍 Please share your location using the WhatsApp location feature.")
+            msg.body(
+                f"✅ *Photo Received!*\n\n"
+                f"📍 *Share Location*\n"
+                f"Finally, please share the location of this issue.\n\n"
+                f"💡 *Tap (+) → Location → Send Your Current Location*\n\n"
+                f"Type *0* to cancel."
+            )
         else:
-            session["step"] = "awaiting_complaint_desc"
-            msg.body("Sorry for the mistake! Please describe the issue again.")
-            
+            msg.body("❌ *No Photo Detected*\n\nPlease send or upload a photo of the issue. Use the paperclip (📎) or camera icon.")
+    
     elif session["step"] == "awaiting_location":
-        if Latitude and Longitude:
-            complaint_id = np.random.randint(1000, 9999)
-            msg.body(f"✅ Complaint Registered Successfully!\n\n🆔 Complaint ID: {complaint_id}\n📌 Status: Pending\n⚡ Priority: High\n\nYou will receive updates here. Thank you for helping keep the city clean! 🙌")
-            session = {"step": "welcome"} # Reset session
+        if body_text == "0":
+            session = {"step": "welcome"}
+            msg.body("Cancelled. Returned to Main Menu.")
+        elif Latitude and Longitude:
+            # Save complaint to Firestore
+            user_data = {
+                "phone": user_phone,
+                "description": session.get("description", ""),
+                "category": session.get("category", ""),
+                "issue_type": session.get("issue_type", ""),
+                "photo_url": session.get("photo_url", ""),
+                "latitude": Latitude,
+                "longitude": Longitude,
+                "location_address": f"{Latitude:.4f}, {Longitude:.4f}"
+            }
+            
+            result = await create_whatsapp_complaint(user_data)
+            
+            if result.get("success"):
+                complaint_id = result.get("complaint_id")
+                msg.body(
+                    f"🎊 *Complaint Registered Successfully!* 🎉\n\n"
+                    f"🆔 *ID:* `{complaint_id[:8]}`\n"
+                    f"📌 *Status:* Pending Review\n"
+                    f"📂 *Category:* {session.get('issue_type')}\n"
+                    f"📍 *Location:* {Latitude:.4f}, {Longitude:.4f}\n\n"
+                    f"We have notified the authorities. You will receive updates directly here on WhatsApp when the status changes.\n\n"
+                    f"Thank you for help keep the city clean! 🙌"
+                )
+            else:
+                msg.body(f"❌ *Error Registering Complaint*\n\n{result.get('error')}\n\nPlease try again later by typing *menu*.")
+            
+            session = {"step": "welcome"}  # Reset session
         else:
-            msg.body("📍 Please share your location using the WhatsApp feature to complete the report.")
-
+            msg.body("❌ *Location Not Found*\n\nPlease use the WhatsApp Location sharing feature (📎 > Location).")
+    
+    # ============ CHECK COMPLAINT STATUS ============
+    elif session["step"] == "awaiting_complaint_id":
+        if len(body_text) >= 6 or body_text.isalnum():
+            status_result = await get_complaint_status(body_text)
+            
+            if status_result.get("success"):
+                status_data = status_result
+                msg.body(
+                    f"📋 Complaint Status\n\n"
+                    f"🆔 ID: {body_text}\n"
+                    f"📌 Status: {status_data.get('status', 'Unknown')}\n"
+                    f"📂 Category: {status_data.get('category', 'Unknown')}\n"
+                    f"📅 Reported: {status_data.get('created_at', 'Unknown')}\n\n"
+                    f"📩 You'll be notified once resolved."
+                )
+            else:
+                msg.body(f"❌ {status_result.get('error')}")
+            
+            session = {"step": "welcome"}
+        else:
+            msg.body("❌ Invalid ID. Please enter a valid Complaint ID")
+    
+    # ============ VIEW NEARBY ISSUES ============
+    elif session["step"] == "awaiting_nearby_location":
+        if Latitude and Longitude:
+            nearby_issues = await get_nearby_issues(Latitude, Longitude)
+            
+            if nearby_issues:
+                issues_text = "📍 Nearby Issues:\n\n"
+                for i, issue in enumerate(nearby_issues, 1):
+                    issues_text += (
+                        f"{i}. {issue['type']}\n"
+                        f"   📏 {issue['distance_m']}m away\n"
+                        f"   📌 Status: {issue['status']}\n"
+                        f"   👍 {issue['upvotes']} upvotes\n\n"
+                    )
+                msg.body(issues_text + "Reply '1' for main menu")
+            else:
+                msg.body("✨ Great! No major issues near you.\n\nIf you see something, report it! 👍\n\nReply '1' for main menu")
+            
+            session = {"step": "welcome"}
+        else:
+            msg.body("❌ Location not received. Please tap (+) → Location feature")
+    
     user_sessions[user_id] = session
-    return str(response)
+    
+    xml_content = str(response)
+    print(f"📤 [WhatsApp Outbound] Sending TwiML:\n{xml_content}\n")
+    
+    return Response(content=xml_content, media_type="text/xml")
+
+@app.get("/whatsapp-complaints")
+async def get_whatsapp_complaints(phone: str = None, status: str = None):
+    """Fetch WhatsApp complaints with optional filters"""
+    if not db:
+        return {"error": "Database offline", "complaints": []}
+    
+    try:
+        query = db.collection('whatsapp_complaints')
+        
+        if phone:
+            query = query.where('phone', '==', phone)
+        if status:
+            query = query.where('status', '==', status)
+        
+        docs = query.order_by('created_at', direction=firestore.Query.DESCENDING).limit(50).stream()
+        complaints = []
+        for doc in docs:
+            data = doc.to_dict()
+            data['id'] = doc.id
+            complaints.append(data)
+        
+        return {"success": True, "complaints": complaints}
+    except Exception as e:
+        return {"error": str(e), "complaints": []}
+
+@app.post("/whatsapp-complaints/{complaint_id}/upvote")
+async def upvote_complaint(complaint_id: str):
+    """Upvote a WhatsApp complaint to increase priority"""
+    if not db:
+        return {"error": "Database offline"}
+    
+    try:
+        doc_ref = db.collection('whatsapp_complaints').document(complaint_id)
+        doc = doc_ref.get()
+        
+        if not doc.exists:
+            return {"error": "Complaint not found"}
+        
+        current_upvotes = doc.to_dict().get('upvotes', 0)
+        doc_ref.update({'upvotes': current_upvotes + 1})
+        
+        return {"success": True, "new_upvote_count": current_upvotes + 1}
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.post("/whatsapp-complaints/{complaint_id}/status")
+async def update_complaint_status(complaint_id: str, status: str, notify: bool = False):
+    """Update complaint status (admin only)"""
+    if not db:
+        return {"error": "Database offline"}
+    
+    valid_statuses = ['Pending', 'In Progress', 'Resolved', 'Rejected']
+    if status not in valid_statuses:
+        return {"error": f"Invalid status. Must be one of: {valid_statuses}"}
+    
+    try:
+        doc_ref = db.collection('whatsapp_complaints').document(complaint_id)
+        doc = doc_ref.get()
+        
+        if not doc.exists:
+            return {"error": "Complaint not found"}
+        
+        complaint_data = doc.to_dict()
+        user_phone = complaint_data.get('phone')
+        issue_type = complaint_data.get('issue_type', 'Issue')
+        
+        # Update status in Firestore
+        doc_ref.update({
+            'status': status,
+            'updated_at': datetime.datetime.now(datetime.timezone.utc)
+        })
+        
+        # Send WhatsApp notification if requested
+        if notify and user_phone:
+            status_emoji = {
+                'Pending': '⏳',
+                'In Progress': '🔧',
+                'Resolved': '✅',
+                'Rejected': '❌'
+            }.get(status, '📍')
+            
+            message = (
+                f"{status_emoji} Status Update\n\n"
+                f"Your complaint for {issue_type} (ID: {complaint_id[:8]})\n"
+                f"Status: {status}\n\n"
+                f"Thank you for helping keep the city clean! 🌍"
+            )
+            
+            await send_whatsapp_message(user_phone, message)
+            return {
+                "success": True,
+                "message": f"Status updated to {status}",
+                "notification_sent": True
+            }
+        else:
+            return {
+                "success": True,
+                "message": f"Status updated to {status}",
+                "notification_sent": False
+            }
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.post("/whatsapp-complaints/{complaint_id}/notify")
+async def send_status_notification(complaint_id: str, custom_message: str = None):
+    """Send custom WhatsApp notification to complainant"""
+    if not db:
+        return {"error": "Database offline"}
+    
+    try:
+        doc = db.collection('whatsapp_complaints').document(complaint_id).get()
+        
+        if not doc.exists:
+            return {"error": "Complaint not found"}
+        
+        complaint_data = doc.to_dict()
+        user_phone = complaint_data.get('phone')
+        
+        if not user_phone:
+            return {"error": "User phone number not found"}
+        
+        if custom_message:
+            message = custom_message
+        else:
+            status = complaint_data.get('status', 'Pending')
+            issue_type = complaint_data.get('issue_type', 'Issue')
+            
+            status_emoji = {
+                'Pending': '⏳',
+                'In Progress': '🔧',
+                'Resolved': '✅',
+                'Rejected': '❌'
+            }.get(status, '📍')
+            
+            message = (
+                f"{status_emoji} Update on Your Report\n\n"
+                f"Issue: {issue_type}\n"
+                f"Current Status: {status}\n"
+                f"ID: {complaint_id[:8]}\n\n"
+                f"We're working to resolve this. Thank you! 🙌"
+            )
+        
+        success = await send_whatsapp_message(user_phone, message)
+        if success:
+            return {"success": True, "message": "Notification sent"}
+        else:
+            return {"error": "Failed to send notification"}
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.post("/whatsapp-complaints/{complaint_id}/analyze")
+async def analyze_whatsapp_complaint(complaint_id: str):
+    """Analyze a WhatsApp complaint image using Gemini to verify its validity"""
+    if not db:
+        return {"error": "Database offline"}
+    if not gemini_model:
+        return {"error": "AI Engine Offline"}
+    
+    try:
+        doc_ref = db.collection('whatsapp_complaints').document(complaint_id)
+        doc = doc_ref.get()
+        
+        if not doc.exists:
+            return {"error": "Complaint not found"}
+        
+        data = doc.to_dict()
+        photo_url = data.get('photo_url')
+        issue_type = data.get('issue_type', 'Unknown')
+        description = data.get('description', '')
+        
+        if not photo_url:
+            return {"error": "No photo available for analysis"}
+
+        # Fetch image from URL
+        
+        with urllib.request.urlopen(photo_url) as response:
+            img_data = response.read()
+
+        prompt = (
+            f"Analyze this image for a civic complaint reporting system.\n"
+            f"User reported: {issue_type}\n"
+            f"User description: {description}\n\n"
+            f"Tasks:\n"
+            f"1. Verify if the image shows a genuine civic issue (garbage, leak, etc.).\n"
+            f"2. Confirm if it matches the reported category: {issue_type}.\n"
+            f"3. Describe the severity and any hazards (e.g., blocks road, smells, chemicals).\n"
+            f"4. Provide a recommendation for the admin (Approve/Reject/Request more info).\n\n"
+            f"Output JSON format:\n"
+            f'{{"is_valid": bool, "summary": "Short result", "analysis": "Detailed description", "confidence": float, "recommendation": "Approve/Reject"}}'
+        )
+
+        response = gemini_model.generate_content(
+            [prompt, {"mime_type": "image/jpeg", "data": img_data}],
+            generation_config={"response_mime_type": "application/json"}
+        )
+        
+        analysis_result = json.loads(response.text)
+        
+        # Update complaint with analysis result
+        doc_ref.update({
+            'ai_analysis': analysis_result,
+            'verified': analysis_result.get('is_valid', False),
+            'updated_at': datetime.datetime.now(datetime.timezone.utc)
+        })
+        
+        return {"success": True, "analysis": analysis_result}
+    except Exception as e:
+        print(f"Analysis Error: {e}")
+        return {"error": str(e)}
+
+@app.post("/whatsapp-complaints/{complaint_id}/status")
+async def update_whatsapp_complaint_status(complaint_id: str, status: str, notify: bool = True):
+    """Update the status of a WhatsApp complaint and optionally notify the citizen via Twilio"""
+    if not db:
+        return {"error": "Database offline"}
+    
+    try:
+        doc_ref = db.collection('whatsapp_complaints').document(complaint_id)
+        doc = doc_ref.get()
+        
+        if not doc.exists:
+            return {"error": "Complaint not found"}
+        
+        data = doc.to_dict()
+        phone = data.get('phone')
+        issue_type = data.get('issue_type', 'Complaint')
+        
+        # Update Firestore
+        doc_ref.update({
+            'status': status,
+            'updated_at': datetime.datetime.now(datetime.timezone.utc)
+        })
+        
+        notification_sent = False
+        message_body = ""
+        
+        if notify and phone and twilio_client:
+            if status == "Resolved":
+                message_body = f"✅ Good news! Your report about {issue_type} has been marking as RESOLVED. Thank you for helping keep our city clean!"
+            elif status == "Rejected":
+                message_body = f"❌ Your report about {issue_type} was reviewed but could not be processed at this time. Please ensure the photo is clear and the location is correct."
+            else:
+                message_body = f"ℹ️ Update: Your report about {issue_type} is now: {status}."
+            
+            try:
+                message = twilio_client.messages.create(
+                    from_=f"whatsapp:{TWILIO_WHATSAPP_NUMBER}",
+                    body=message_body,
+                    to=f"whatsapp:{phone}"
+                )
+                print(f"[NOTIFY] Sent status update to {phone}: {message.sid}")
+                notification_sent = True
+            except Exception as twilio_err:
+                print(f"[TWILIO ERROR] Failed to send notification: {twilio_err}")
+        
+        return {
+            "success": True, 
+            "status": status, 
+            "notification_sent": notification_sent,
+            "message": message_body if notification_sent else "Status updated (no notification sent)"
+        }
+    except Exception as e:
+        print(f"Status Update Error: {e}")
+        return {"error": str(e)}
 
 @app.post("/verify")
 async def verify(req: VerificationRequest):

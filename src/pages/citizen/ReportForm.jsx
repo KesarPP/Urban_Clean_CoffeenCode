@@ -4,6 +4,7 @@ import { Camera, MapPin, UploadCloud, CheckCircle, Loader2, AlertTriangle, Thumb
 import { motion, AnimatePresence } from 'framer-motion';
 import { collection, addDoc, updateDoc, doc, arrayUnion, increment } from 'firebase/firestore';
 import { db, auth } from '../../firebase/config';
+import WhatsAppFloatingButton from '../../components/WhatsAppFloatingButton';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 
@@ -354,6 +355,9 @@ export default function ReportForm() {
           />
         )}
       </AnimatePresence>
+
+      {/* WhatsApp Floating Button */}
+      <WhatsAppFloatingButton />
     </div>
   );
 }

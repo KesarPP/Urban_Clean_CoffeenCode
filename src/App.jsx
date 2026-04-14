@@ -20,6 +20,7 @@ import TrackComplaint from './pages/citizen/TrackComplaint';
 import EducationHub from './pages/citizen/EducationHub';
 import NgoDashboard from './pages/ngo/NgoDashboard';
 import NgoProfile from './pages/ngo/NgoProfile';
+import NgoEvents from './pages/ngo/NgoEvents';
 import { useTheme } from './context/ThemeContext';
 import { Sun, Moon, Loader2 } from 'lucide-react';
 
@@ -94,6 +95,7 @@ function NgoApp({ user, onLogout }) {
           <Routes>
             <Route path="dashboard" element={<NgoDashboard user={user} />} />
             <Route path="profile" element={<NgoProfile user={user} />} />
+            <Route path="events" element={<NgoEvents user={user} />} />
             <Route path="*" element={<Navigate to="dashboard" />} />
           </Routes>
         </main>

@@ -1,9 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Check, X, Play, Image as ImageIcon, Upload, FileText, ShieldCheck, Camera } from 'lucide-react';
+import { Check, X, Play, Image as ImageIcon, Upload, FileText, ShieldCheck, Camera, MessageSquare, Users, Layers, ExternalLink, ShieldAlert, Wand2, CheckCircle2, XCircle, BadgeCheck } from 'lucide-react';
 import { collection, onSnapshot, doc, updateDoc } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { db, storage } from '../../firebase/config';
+import { db } from '../../firebase/config';
 
 import LiveCameraCapture from './CameraResolution';
 
@@ -202,64 +201,70 @@ function ResolveProofModal({ issue, user, onConfirm, onCancel }) {
   );
 }
 
-const initialIssues = [
-  { id: '108', issue: 'Hazardous Waste Overflow', type: 'Citizen Report', source: 'Mobile App', date: '10-15-22', status: 'Pending Review', location: 'Bandra' },
-  { id: '117', issue: 'Bin No #895 at 100% capacity', type: 'IoT Sensor', source: 'Smart Bin System', date: '10-20-22', status: 'Resolved', location: 'Dadar' },
-  { id: '124', issue: 'Add new bin sensor to system', type: 'System Request', source: 'Admin Console', date: '10-22-22', status: 'Resolved', location: 'BKC' },
-  { id: '127', issue: 'Bin ID 12275 at 100% fill level', type: 'IoT Sensor', source: 'Smart Bin System', date: '10-25-22', status: 'In Progress', location: 'Andheri' },
-  { id: '133', issue: 'Massive Pothole located Sector 4', type: 'Citizen Report', source: 'Mobile App', date: '10-29-22', status: 'Pending Review', location: 'Juhu' },
-  { id: '142', issue: 'Garbage accumulation near station', type: 'Citizen Report', source: 'Mobile App', date: '11-02-22', status: 'Pending Review', location: 'Dadar' },
-  { id: '145', issue: 'Overflowing garbage bin near school', type: 'Citizen Report', source: 'Mobile App', date: '11-05-22', status: 'In Progress', location: 'Kurla' },
-  { id: '149', issue: 'Bin ID 22341 sensor malfunction', type: 'IoT Sensor', source: 'Smart Bin System', date: '11-07-22', status: 'Pending Review', location: 'Ghatkopar' },
-  { id: '153', issue: 'Illegal dumping detected', type: 'Citizen Report', source: 'Mobile App', date: '11-10-22', status: 'In Progress', location: 'Chembur' },
-  { id: '158', issue: 'Request for additional waste bins', type: 'System Request', source: 'Admin Console', date: '11-12-22', status: 'Pending Review', location: 'Powai' },
-  { id: '162', issue: 'Bin No #452 at critical level', type: 'IoT Sensor', source: 'Smart Bin System', date: '11-14-22', status: 'Resolved', location: 'Malad' },
-  { id: '168', issue: 'Street littering complaint', type: 'Citizen Report', source: 'Mobile App', date: '11-18-22', status: 'Pending Review', location: 'Colaba' },
-  { id: '172', issue: 'Smart bin connectivity lost', type: 'IoT Sensor', source: 'Smart Bin System', date: '11-20-22', status: 'In Progress', location: 'Vile Parle' },
-  { id: '176', issue: 'Garbage truck delay reported', type: 'Citizen Report', source: 'Mobile App', date: '11-23-22', status: 'Pending Review', location: 'Santacruz' },
-  { id: '181', issue: 'System upgrade for waste tracking', type: 'System Request', source: 'Admin Console', date: '11-25-22', status: 'Resolved', location: 'Lower Parel' },
-  { id: '185', issue: 'Bin ID 99871 at overflow level', type: 'IoT Sensor', source: 'Smart Bin System', date: '11-28-22', status: 'In Progress', location: 'Borivali' },
-  { id: '190', issue: 'Debris accumulation after construction', type: 'Citizen Report', source: 'Mobile App', date: '12-01-22', status: 'Pending Review', location: 'Kandivali' },
+// ─── Section Tab Definitions ────────────────────────────────────────────────────
+const SECTIONS = [
+  { id: 'whatsapp', label: 'WhatsApp Complaints', icon: MessageSquare, color: 'text-emerald-500', activeBg: 'bg-emerald-500' },
+  { id: 'citizen', label: 'Citizen Reports', icon: Users, color: 'text-blue-500', activeBg: 'bg-blue-500' },
+  { id: 'all', label: 'All Reports', icon: Layers, color: 'text-purple-500', activeBg: 'bg-purple-500' },
 ];
 
 export default function DataTable({ user, spanClass = '' }) {
-  const [issues, setIssues] = useState(initialIssues);
+  const [activeSection, setActiveSection] = useState('whatsapp');
+  const [citizenReports, setCitizenReports] = useState([]);
+  const [whatsappComplaints, setWhatsappComplaints] = useState([]);
   const [statusFilter, setStatusFilter] = useState('All');
-  const [locationFilter, setLocationFilter] = useState('All Locations');
-  const [resolveProofContext, setResolveProofContext] = useState(null); // { id, issue }
+  const [resolveProofContext, setResolveProofContext] = useState(null);
+  const [analyzingIds, setAnalyzingIds] = useState(new Set());
 
+  // ─── Firestore Listeners ─────────────────────────────────────────────────────
   useEffect(() => {
-    const unsubscribe = onSnapshot(collection(db, 'citizen_reports'), (snapshot) => {
+    const unsubCitizen = onSnapshot(collection(db, 'citizen_reports'), (snapshot) => {
       const mapped = [];
-      snapshot.forEach((doc) => {
-        const r = doc.data();
-          mapped.push({
-            id: doc.id.substring(0, 4).toUpperCase(),
-            rawId: doc.id,
-            issue: r.title,
-            type: 'Citizen Report',
-            source: 'Mobile App',
-            date: r.date?.split(',')[0] || r.date,
-            status: r.status,
-            location: r.location?.split(',')[0] || r.location,
-            image_proof: r.image_proof,
-            resolution_proof: r.resolution_proof,
-            is_verified: r.is_verified,
-            audit_result: r.audit_result,
-            audit_distance_meters: r.audit_distance_meters,
-            cleanup_efficiency: r.cleanup_efficiency,
-            items_before: r.items_before,
-            items_after: r.items_after
-          });
+      snapshot.forEach((d) => {
+        const r = d.data();
+        mapped.push({
+          id: d.id.substring(0, 4).toUpperCase(),
+          rawId: d.id,
+          issue: r.title,
+          type: 'Citizen Report',
+          source: 'Mobile App',
+          date: r.date?.split(',')[0] || r.date,
+          status: r.status,
+          location: r.location?.split(',')[0] || r.location,
+          image_proof: r.image_proof,
+          resolution_proof: r.resolution_proof,
+          is_verified: r.is_verified,
+          audit_result: r.audit_result,
+          audit_distance_meters: r.audit_distance_meters,
+          cleanup_efficiency: r.cleanup_efficiency,
+          items_before: r.items_before,
+          items_after: r.items_after,
+          location_coords: r.location_coords,
+          timestamp: r.timestamp
+        });
       });
-      setIssues([...mapped, ...initialIssues]);
+      // Sort newest first
+      mapped.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+      setCitizenReports(mapped);
     }, (error) => {
       console.error("Failed to fetch citizen reports", error);
     });
 
-    return () => unsubscribe();
+    const unsubWhatsApp = onSnapshot(collection(db, 'whatsapp_complaints'), (snapshot) => {
+      const list = [];
+      snapshot.forEach((entry) => list.push({ id: entry.id, ...entry.data() }));
+      setWhatsappComplaints(list.sort((a, b) => (b.created_at?.seconds || 0) - (a.created_at?.seconds || 0)));
+    }, (error) => {
+      console.error("Failed to fetch whatsapp complaints", error);
+    });
+
+    return () => {
+      unsubCitizen();
+      unsubWhatsApp();
+    };
   }, []);
 
+  // ─── Citizen Report Actions ──────────────────────────────────────────────────
   const handleResolveConfirm = async (proofData) => {
     const { id } = resolveProofContext;
     const finalStatus = proofData.is_verified ? 'Resolved' : 'Audit Pending';
@@ -269,12 +274,12 @@ export default function DataTable({ user, spanClass = '' }) {
 
   const updateStatus = async (id, newStatus, proofData = null) => {
     if (newStatus === 'Resolved' && !proofData) {
-      const issue = issues.find(i => i.id === id);
-      setResolveProofContext({ id, issue: issue.issue });
+      const issue = citizenReports.find(i => i.id === id);
+      setResolveProofContext({ id, issue: issue?.issue });
       return;
     }
 
-    const issueToUpdate = issues.find(i => i.id === id);
+    const issueToUpdate = citizenReports.find(i => i.id === id);
     if (issueToUpdate && issueToUpdate.rawId) {
       try {
         let styling = { color: 'text-accent-yellow', bg: 'bg-accent-yellow/10', border: 'border-accent-yellow/20' };
@@ -291,7 +296,7 @@ export default function DataTable({ user, spanClass = '' }) {
         if (proofData) {
           updateData.resolution_proof = {
             notes: proofData.notes,
-            images: proofData.images, // Actual URLs or DataURLs
+            images: proofData.images,
             admin_name: proofData.admin_name,
             admin_id: proofData.admin_id,
             timestamp: new Date().toISOString()
@@ -309,38 +314,65 @@ export default function DataTable({ user, spanClass = '' }) {
       } catch (err) {
         console.error("Failed to update status in Firebase", err);
       }
-    } else {
-      // Fallback for mocked static initial issues
-      const nextIssues = issues.map(issue => {
-        if (issue.id === id) {
-          return {
-            ...issue,
-            status: newStatus,
-            resolution_proof: proofData ? { notes: proofData.notes } : null
-          };
-        }
-        return issue;
-      });
-      setIssues(nextIssues);
     }
   };
 
-  const locations = ['All Locations', ...new Set(initialIssues.map(i => i.location))];
+  // ─── WhatsApp Complaint Actions ──────────────────────────────────────────────
+  const handleAnalyze = async (complaintId) => {
+    setAnalyzingIds((prev) => new Set([...prev, complaintId]));
+    try {
+      const response = await fetch(`http://localhost:8005/whatsapp-complaints/${complaintId}/analyze`, {
+        method: 'POST'
+      });
+      const result = await response.json();
+      if (result.success) {
+        console.log('Analysis successful:', result.analysis);
+      } else {
+        alert('Analysis failed: ' + result.error);
+      }
+    } catch (error) {
+      console.error('Error analyzing complaint:', error);
+      alert('Could not reach analysis server.');
+    } finally {
+      setAnalyzingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(complaintId);
+        return next;
+      });
+    }
+  };
 
-  const filteredIssues = issues.filter(issue => {
-    const statusMatch = statusFilter === 'All' || 
-      (statusFilter === 'Pending' && issue.status === 'Pending Review') ||
-      (statusFilter === 'Running' && issue.status === 'In Progress') ||
-      (statusFilter === 'Solved' && issue.status === 'Resolved') ||
-      (statusFilter === 'Audit Flagged' && issue.status === 'Audit Pending') ||
-      (statusFilter === 'Rejected' && issue.status === 'Rejected');
-    
-    const locationMatch = locationFilter === 'All Locations' || issue.location === locationFilter;
-    
-    return statusMatch && locationMatch;
-  });
+  const handleUpdateWhatsAppStatus = async (complaintId, newStatus, notify = true) => {
+    try {
+      const response = await fetch(`http://localhost:8005/whatsapp-complaints/${complaintId}/status?status=${newStatus}&notify=${notify}`, {
+        method: 'POST'
+      });
+      const result = await response.json();
+      if (result.success) {
+        console.log('Status updated successfully');
+      } else {
+        alert('Update failed: ' + result.error);
+      }
+    } catch (error) {
+      console.error('Error updating status:', error);
+      alert('Could not reach server.');
+    }
+  };
 
+  // ─── Filtering ───────────────────────────────────────────────────────────────
   const statusFilters = ['All', 'Pending', 'Running', 'Audit Flagged', 'Solved', 'Rejected'];
+
+  const filterByStatus = (items) => {
+    return items.filter(issue => {
+      if (statusFilter === 'All') return true;
+      if (statusFilter === 'Pending' && (issue.status === 'Pending Review' || issue.status === 'Pending')) return true;
+      if (statusFilter === 'Running' && issue.status === 'In Progress') return true;
+      if (statusFilter === 'Solved' && issue.status === 'Resolved') return true;
+      if (statusFilter === 'Audit Flagged' && issue.status === 'Audit Pending') return true;
+      if (statusFilter === 'Rejected' && issue.status === 'Rejected') return true;
+      return false;
+    });
+  };
 
   const getStatusColor = (status) => {
     if (status === 'Resolved') return 'bg-green-500/10 text-accentGreen border-green-500/20';
@@ -350,28 +382,43 @@ export default function DataTable({ user, spanClass = '' }) {
     return 'bg-yellow-500/10 text-accentYellow border-yellow-500/20';
   };
 
+  const filteredCitizenReports = filterByStatus(citizenReports);
+  const filteredWhatsAppComplaints = filterByStatus(whatsappComplaints);
+  const allReports = filterByStatus([
+    ...citizenReports.map(r => ({ ...r, _source: 'citizen' })),
+    ...whatsappComplaints.map(c => ({
+      id: c.id.substring(0, 4).toUpperCase(),
+      rawId: c.id,
+      issue: c.issue_type || 'WhatsApp Report',
+      type: 'WhatsApp',
+      source: 'WhatsApp Bot',
+      date: c.created_at?.seconds ? new Date(c.created_at.seconds * 1000).toLocaleDateString() : 'Unknown',
+      status: c.status || 'Pending',
+      location: c.location_address || 'Unknown',
+      image_proof: c.photo_url,
+      _source: 'whatsapp',
+      _original: c
+    }))
+  ]);
+
+  // ─── Section Counts ──────────────────────────────────────────────────────────
+  const counts = {
+    whatsapp: whatsappComplaints.length,
+    citizen: citizenReports.length,
+    all: whatsappComplaints.length + citizenReports.length
+  };
+
   return (
     <div className={`glass-card rounded-xl overflow-hidden flex flex-col ${spanClass}`}>
-      {/* Header and Filters */}
-      <div className="bg-[var(--card-bg)]/80 px-4 py-4 border-b border-[var(--border-color)] backdrop-blur-sm flex flex-wrap items-center justify-between sticky top-0 z-10 gap-4">
-        <div className="flex items-center gap-3">
-          <div className="w-2 h-2 bg-accentGreen rounded-full animate-pulse shadow-glow-green"></div>
-          <h3 className="font-semibold text-lg text-text-primary">Live Report Management</h3>
-        </div>
-        
-        <div className="flex flex-wrap items-center gap-3">
-          {/* Location Filter */}
-          <select 
-            value={locationFilter}
-            onChange={(e) => setLocationFilter(e.target.value)}
-            className="bg-[var(--input-bg)] border border-[var(--border-color)] text-text-primary text-xs rounded-lg focus:ring-primary focus:border-primary block p-2 transition-all outline-none"
-          >
-            {locations.map(loc => (
-              <option key={loc} value={loc}>{loc}</option>
-            ))}
-          </select>
-
-          {/* Status Filter */}
+      {/* Header with Section Tabs */}
+      <div className="bg-[var(--card-bg)]/80 px-4 py-4 border-b border-[var(--border-color)] backdrop-blur-sm sticky top-0 z-10">
+        <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
+          <div className="flex items-center gap-3">
+            <div className="w-2 h-2 bg-accentGreen rounded-full animate-pulse shadow-glow-green"></div>
+            <h3 className="font-semibold text-lg text-text-primary">Complaint Command Center</h3>
+          </div>
+          
+          {/* Status Filter Pills */}
           <div className="flex gap-1 bg-[var(--input-bg)]/50 p-1 rounded-lg border border-[var(--border-color)]">
             {statusFilters.map(f => (
               <button
@@ -384,121 +431,332 @@ export default function DataTable({ user, spanClass = '' }) {
             ))}
           </div>
         </div>
+
+        {/* Section Tabs */}
+        <div className="flex gap-2">
+          {SECTIONS.map(section => {
+            const active = activeSection === section.id;
+            return (
+              <button
+                key={section.id}
+                onClick={() => setActiveSection(section.id)}
+                className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold transition-all ${active
+                  ? `${section.activeBg} text-white shadow-lg scale-[1.02]`
+                  : 'bg-[var(--input-bg)] text-text-secondary hover:text-text-primary border border-[var(--border-color)] hover:border-primary/30'
+                }`}
+              >
+                <section.icon className="h-4 w-4" />
+                {section.label}
+                <span className={`ml-1 text-[10px] font-black px-1.5 py-0.5 rounded-full ${active ? 'bg-white/20' : 'bg-[var(--border-color)]'}`}>
+                  {counts[section.id]}
+                </span>
+              </button>
+            );
+          })}
+        </div>
       </div>
 
-      {/* Main Table */}
-      <div className="overflow-x-auto min-h-[300px]">
-        <table className="w-full text-left text-sm text-text-secondary whitespace-nowrap">
-          <thead className="text-xs uppercase bg-[var(--input-bg)]/50 border-b border-[var(--border-color)] text-text-primary">
-            <tr>
-              <th className="px-4 py-4 font-semibold">Incident ID & Details</th>
-              <th className="px-4 py-4 font-semibold">Location</th>
-              <th className="px-4 py-4 font-semibold">Source</th>
-              <th className="px-4 py-4 font-semibold text-center">Verification</th>
-              <th className="px-4 py-4 font-semibold">Status</th>
-              <th className="px-4 py-4 font-semibold text-right">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            <AnimatePresence mode='popLayout'>
-              {filteredIssues.map((i) => (
-                  <motion.tr 
-                  layout
-                  initial={{ opacity: 0, x: -10 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, scale: 0.95 }}
-                  key={i.id} 
-                  className="border-b border-[var(--border-color)]/50 hover:bg-[var(--input-bg)]/40 transition-all group"
+      {/* ═══════════════════════════════════════════════════════════════════════════
+          SECTION 1: WhatsApp Complaints
+         ═══════════════════════════════════════════════════════════════════════════ */}
+      {activeSection === 'whatsapp' && (
+        <div className="p-4">
+          <p className="text-sm text-text-secondary mb-4">Real-time reports originating from the WhatsApp Chatbot.</p>
+          
+          {filteredWhatsAppComplaints.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-20 gap-3">
+              <div className="p-4 bg-[var(--input-bg)] rounded-full text-text-secondary opacity-30"><MessageSquare size={40} /></div>
+              <p className="text-sm text-text-secondary">No WhatsApp complaints match the current filter.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {filteredWhatsAppComplaints.map((complaint) => (
+                <motion.div
+                  key={complaint.id}
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="p-4 rounded-2xl border border-[var(--border-color)] bg-[var(--input-bg)] flex flex-col gap-3 relative overflow-hidden group hover:border-emerald-500/30 transition-all"
                 >
-                  <td className="px-4 py-4">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-lg bg-[var(--input-bg)] border border-[var(--border-color)] flex items-center justify-center shrink-0 overflow-hidden group-hover:border-primary/50 transition-colors">
-                        {i.image_proof ? (
-                          <img src={i.image_proof} className="w-full h-full object-cover" alt="Proof Thumbnail" />
-                        ) : (
-                          i.type.includes('Citizen') ? <ImageIcon className="h-5 w-5 text-gray-500" /> : <div className="text-xs font-bold text-gray-500">IoT</div>
-                        )}
+                  {complaint.verified && <div className="absolute top-2 right-2 text-emerald-500"><BadgeCheck size={20} /></div>}
+
+                  <div className="flex gap-3">
+                    {complaint.photo_url ? (
+                      <img
+                        src={complaint.photo_url}
+                        alt="Issue"
+                        className="w-24 h-24 rounded-xl object-cover border border-[var(--border-color)] cursor-pointer hover:opacity-80 transition-opacity"
+                        onClick={() => window.open(complaint.photo_url, '_blank')}
+                      />
+                    ) : (
+                      <div className="w-24 h-24 rounded-xl bg-[var(--card-bg)] flex items-center justify-center border border-[var(--border-color)] text-text-secondary">
+                        <ShieldAlert size={24} />
                       </div>
-                      <div>
-                        <div className="font-medium text-text-primary group-hover:text-primary transition-colors">#{i.id} {i.issue}</div>
-                        <div className="text-xs text-text-secondary mt-1">{i.type} • {i.date}</div>
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <p className="font-bold text-text-primary truncate">{complaint.issue_type || 'WhatsApp Report'}</p>
+                        <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase shrink-0 ${complaint.status === 'Resolved' ? 'bg-emerald-500/20 text-emerald-500' :
+                          complaint.status === 'In Progress' ? 'bg-blue-500/20 text-blue-500' :
+                            complaint.status === 'Rejected' ? 'bg-red-500/20 text-red-500' : 'bg-amber-500/20 text-amber-500'
+                          }`}>
+                          {complaint.status || 'Pending'}
+                        </span>
                       </div>
+                      <p className="text-xs text-text-secondary line-clamp-2 mt-1">{complaint.description}</p>
+                      <p className="text-[10px] text-text-secondary mt-2 flex items-center gap-1">
+                        <ExternalLink size={10} /> {complaint.phone} • {complaint.location_address || 'Unknown Loc'}
+                      </p>
                     </div>
-                  </td>
-                  <td className="px-4 py-4 text-xs font-medium text-text-primary">
-                    <span className="flex items-center gap-1.5">
-                      <div className="w-1.5 h-1.5 rounded-full bg-primary/40 group-hover:bg-primary transition-colors"></div>
-                      {i.location}
-                    </span>
-                  </td>
-                  <td className="px-4 py-4">{i.source}</td>
-                  <td className="px-4 py-4 text-center">
-                    {i.resolution_proof ? (
-                      <div className="flex justify-center">
-                        <div 
-                          className={`p-1 px-3 border rounded-full flex items-center gap-1.5 cursor-help transition-all shadow-sm
-                            ${i.is_verified ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-500' : 'bg-red-500/10 border-red-500/20 text-red-500'}
-                          `} 
-                          title={`${i.audit_result}\nNotes: ${i.resolution_proof.notes}`}
-                        >
-                          <ShieldCheck className="h-3 w-3 shadow-glow" />
-                          <span className="text-[10px] font-black uppercase tracking-tighter">
-                            {i.is_verified 
-                              ? `${Math.round((i.cleanup_efficiency || 0) * 100)}% Clean` 
-                              : 'Breach'}
-                          </span>
+                  </div>
+
+                  {/* AI Analysis View */}
+                  {complaint.ai_analysis && (
+                    <div className="p-3 rounded-xl bg-primary/5 border border-primary/20 mt-1">
+                      <div className="flex items-center justify-between mb-1">
+                        <p className="text-[10px] font-bold text-primary flex items-center gap-1 uppercase tracking-wider">
+                          <Wand2 size={10} /> Gemini 3 Flash Insight
+                        </p>
+                        <span className="text-[10px] font-mono text-primary/60">{Math.round((complaint.ai_analysis.confidence || 0) * 100)}% Match</span>
+                      </div>
+                      <p className="text-xs text-text-primary leading-relaxed">{complaint.ai_analysis.summary}</p>
+                      <p className="text-[10px] text-text-secondary mt-1 italic line-clamp-1">{complaint.ai_analysis.analysis}</p>
+                    </div>
+                  )}
+
+                  <div className="flex gap-2 mt-auto pt-2 border-t border-[var(--border-color)]/50">
+                    <button
+                      type="button"
+                      onClick={() => handleAnalyze(complaint.id)}
+                      disabled={analyzingIds.has(complaint.id)}
+                      className={`flex-1 py-1.5 rounded-lg text-[11px] font-bold flex items-center justify-center gap-2 transition-all ${analyzingIds.has(complaint.id)
+                        ? 'bg-primary/20 text-primary cursor-wait'
+                        : 'bg-[var(--card-bg)] text-text-primary border border-[var(--border-color)] hover:border-primary/50'
+                        }`}
+                    >
+                      <Wand2 size={12} className={analyzingIds.has(complaint.id) ? 'animate-pulse' : ''} />
+                      {analyzingIds.has(complaint.id) ? 'Analyzing...' : 'Analyze with AI'}
+                    </button>
+
+                    <div className="flex gap-1">
+                      <button
+                        onClick={() => handleUpdateWhatsAppStatus(complaint.id, 'Resolved')}
+                        title="Mark Resolved & Notify"
+                        className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500 hover:text-white transition-colors border border-emerald-500/20"
+                      >
+                        <CheckCircle2 size={14} />
+                      </button>
+                      <button
+                        onClick={() => handleUpdateWhatsAppStatus(complaint.id, 'Rejected')}
+                        title="Reject & Notify"
+                        className="p-1.5 rounded-lg bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white transition-colors border border-red-500/20"
+                      >
+                        <XCircle size={14} />
+                      </button>
+                    </div>
+                  </div>
+                </motion.div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ═══════════════════════════════════════════════════════════════════════════
+          SECTION 2: Citizen Reports Table
+         ═══════════════════════════════════════════════════════════════════════════ */}
+      {activeSection === 'citizen' && (
+        <div className="overflow-x-auto min-h-[300px]">
+          <table className="w-full text-left text-sm text-text-secondary whitespace-nowrap">
+            <thead className="text-xs uppercase bg-[var(--input-bg)]/50 border-b border-[var(--border-color)] text-text-primary">
+              <tr>
+                <th className="px-4 py-4 font-semibold">Incident ID & Details</th>
+                <th className="px-4 py-4 font-semibold">Location</th>
+                <th className="px-4 py-4 font-semibold">Source</th>
+                <th className="px-4 py-4 font-semibold text-center">Verification</th>
+                <th className="px-4 py-4 font-semibold">Status</th>
+                <th className="px-4 py-4 font-semibold text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <AnimatePresence mode='popLayout'>
+                {filteredCitizenReports.map((i) => (
+                    <motion.tr 
+                    layout
+                    initial={{ opacity: 0, x: -10 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, scale: 0.95 }}
+                    key={i.rawId || i.id} 
+                    className="border-b border-[var(--border-color)]/50 hover:bg-[var(--input-bg)]/40 transition-all group"
+                  >
+                    <td className="px-4 py-4">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-lg bg-[var(--input-bg)] border border-[var(--border-color)] flex items-center justify-center shrink-0 overflow-hidden group-hover:border-primary/50 transition-colors">
+                          {i.image_proof ? (
+                            <img src={i.image_proof} className="w-full h-full object-cover" alt="Proof Thumbnail" />
+                          ) : (
+                            <ImageIcon className="h-5 w-5 text-gray-500" />
+                          )}
+                        </div>
+                        <div>
+                          <div className="font-medium text-text-primary group-hover:text-primary transition-colors">#{i.id} {i.issue}</div>
+                          <div className="text-xs text-text-secondary mt-1">{i.type} • {i.date}</div>
                         </div>
                       </div>
-                    ) : (
-                      <span className="text-[10px] text-text-secondary opacity-50 italic">No proof yet</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-4">
-                    <span className={`px-3 py-1.5 rounded-full text-xs font-bold border transition-all ${getStatusColor(i.status)}`}>
-                      {i.status}
-                    </span>
-                  </td>
-                  <td className="px-4 py-4 text-right">
-                    <div className="flex items-center justify-end gap-2">
-                       {(i.status === 'Pending Review' || i.status === 'Rejected') && (
-                         <>
-                           <button onClick={() => updateStatus(i.id, 'In Progress')} className="p-2 bg-blue-500/10 text-primary hover:bg-blue-500/30 border border-blue-500/20 rounded-lg transition-all active:scale-90" title="Start Progress">
-                             <Play className="h-4 w-4" />
-                           </button>
-                           {i.status !== 'Rejected' && (
-                             <button onClick={() => updateStatus(i.id, 'Rejected')} className="p-2 bg-red-500/10 text-accentRed hover:bg-red-500/30 border border-red-500/20 rounded-lg transition-all active:scale-90" title="Reject Report">
-                               <X className="h-4 w-4" />
+                    </td>
+                    <td className="px-4 py-4 text-xs font-medium text-text-primary">
+                      <span className="flex items-center gap-1.5">
+                        <div className="w-1.5 h-1.5 rounded-full bg-primary/40 group-hover:bg-primary transition-colors"></div>
+                        {i.location}
+                      </span>
+                    </td>
+                    <td className="px-4 py-4">{i.source}</td>
+                    <td className="px-4 py-4 text-center">
+                      {i.resolution_proof ? (
+                        <div className="flex justify-center">
+                          <div 
+                            className={`p-1 px-3 border rounded-full flex items-center gap-1.5 cursor-help transition-all shadow-sm
+                              ${i.is_verified ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-500' : 'bg-red-500/10 border-red-500/20 text-red-500'}
+                            `} 
+                            title={`${i.audit_result}\nNotes: ${i.resolution_proof.notes}`}
+                          >
+                            <ShieldCheck className="h-3 w-3 shadow-glow" />
+                            <span className="text-[10px] font-black uppercase tracking-tighter">
+                              {i.is_verified 
+                                ? `${Math.round((i.cleanup_efficiency || 0) * 100)}% Clean` 
+                                : 'Breach'}
+                            </span>
+                          </div>
+                        </div>
+                      ) : (
+                        <span className="text-[10px] text-text-secondary opacity-50 italic">No proof yet</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-4">
+                      <span className={`px-3 py-1.5 rounded-full text-xs font-bold border transition-all ${getStatusColor(i.status)}`}>
+                        {i.status}
+                      </span>
+                    </td>
+                    <td className="px-4 py-4 text-right">
+                      <div className="flex items-center justify-end gap-2">
+                         {(i.status === 'Pending Review' || i.status === 'Rejected') && (
+                           <>
+                             <button onClick={() => updateStatus(i.id, 'In Progress')} className="p-2 bg-blue-500/10 text-primary hover:bg-blue-500/30 border border-blue-500/20 rounded-lg transition-all active:scale-90" title="Start Progress">
+                               <Play className="h-4 w-4" />
                              </button>
-                           )}
-                         </>
-                       )}
-                       {i.status === 'In Progress' && (
-                         <button onClick={() => updateStatus(i.id, 'Resolved')} className="px-4 py-2 bg-accentGreen/10 text-accentGreen hover:bg-accentGreen/20 border border-accentGreen/20 rounded-xl font-bold flex items-center gap-2 transition-all active:scale-95 text-xs shadow-sm" title="Mark as Solved">
-                           <Check className="h-4 w-4" /> Resolve
-                         </button>
-                       )}
-                       {i.status === 'Resolved' && (
-                         <span className="text-xs text-text-secondary font-bold px-4 py-2 bg-[var(--input-bg)] border border-[var(--border-color)] rounded-xl opacity-60">Verified</span>
-                       )}
+                             {i.status !== 'Rejected' && (
+                               <button onClick={() => updateStatus(i.id, 'Rejected')} className="p-2 bg-red-500/10 text-accentRed hover:bg-red-500/30 border border-red-500/20 rounded-lg transition-all active:scale-90" title="Reject Report">
+                                 <X className="h-4 w-4" />
+                               </button>
+                             )}
+                           </>
+                         )}
+                         {i.status === 'In Progress' && (
+                           <button onClick={() => updateStatus(i.id, 'Resolved')} className="px-4 py-2 bg-accentGreen/10 text-accentGreen hover:bg-accentGreen/20 border border-accentGreen/20 rounded-xl font-bold flex items-center gap-2 transition-all active:scale-95 text-xs shadow-sm" title="Mark as Solved">
+                             <Check className="h-4 w-4" /> Resolve
+                           </button>
+                         )}
+                         {i.status === 'Resolved' && (
+                           <span className="text-xs text-text-secondary font-bold px-4 py-2 bg-[var(--input-bg)] border border-[var(--border-color)] rounded-xl opacity-60">Verified</span>
+                         )}
+                      </div>
+                    </td>
+                  </motion.tr>
+                ))}
+              </AnimatePresence>
+              
+              {filteredCitizenReports.length === 0 && (
+                <tr>
+                  <td colSpan="6" className="text-center py-20">
+                    <div className="flex flex-col items-center gap-3">
+                      <div className="p-4 bg-[var(--input-bg)] rounded-full text-text-secondary opacity-30"><Users size={40} /></div>
+                      <p className="text-sm text-text-secondary">No citizen reports match the current filter.</p>
                     </div>
                   </td>
-                </motion.tr>
-              ))}
-            </AnimatePresence>
-            
-            {filteredIssues.length === 0 && (
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* ═══════════════════════════════════════════════════════════════════════════
+          SECTION 3: All Reports (Combined View)
+         ═══════════════════════════════════════════════════════════════════════════ */}
+      {activeSection === 'all' && (
+        <div className="overflow-x-auto min-h-[300px]">
+          <table className="w-full text-left text-sm text-text-secondary whitespace-nowrap">
+            <thead className="text-xs uppercase bg-[var(--input-bg)]/50 border-b border-[var(--border-color)] text-text-primary">
               <tr>
-                <td colSpan="6" className="text-center py-20">
-                  <div className="flex flex-col items-center gap-3">
-                    <div className="p-4 bg-[var(--input-bg)] rounded-full text-text-secondary opacity-30"><ImageIcon size={40} /></div>
-                    <p className="text-sm text-text-secondary">No matching resolution reports found.</p>
-                  </div>
-                </td>
+                <th className="px-4 py-4 font-semibold">Incident ID & Details</th>
+                <th className="px-4 py-4 font-semibold">Source</th>
+                <th className="px-4 py-4 font-semibold">Location</th>
+                <th className="px-4 py-4 font-semibold">Status</th>
+                <th className="px-4 py-4 font-semibold">Date</th>
               </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              <AnimatePresence mode='popLayout'>
+                {allReports.map((r, idx) => (
+                  <motion.tr
+                    layout
+                    initial={{ opacity: 0, x: -10 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, scale: 0.95 }}
+                    key={`${r._source}-${r.rawId || r.id}-${idx}`}
+                    className="border-b border-[var(--border-color)]/50 hover:bg-[var(--input-bg)]/40 transition-all group"
+                  >
+                    <td className="px-4 py-4">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-lg bg-[var(--input-bg)] border border-[var(--border-color)] flex items-center justify-center shrink-0 overflow-hidden group-hover:border-primary/50 transition-colors">
+                          {r.image_proof ? (
+                            <img src={r.image_proof} className="w-full h-full object-cover" alt="Proof" />
+                          ) : (
+                            r._source === 'whatsapp'
+                              ? <MessageSquare className="h-5 w-5 text-emerald-500" />
+                              : <ImageIcon className="h-5 w-5 text-gray-500" />
+                          )}
+                        </div>
+                        <div>
+                          <div className="font-medium text-text-primary group-hover:text-primary transition-colors">#{r.id} {r.issue}</div>
+                          <div className="text-xs text-text-secondary mt-1">{r.type}</div>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-4 py-4">
+                      <span className={`text-[10px] px-2 py-1 rounded-full font-bold uppercase ${r._source === 'whatsapp' ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20' : 'bg-blue-500/10 text-blue-500 border border-blue-500/20'}`}>
+                        {r.source}
+                      </span>
+                    </td>
+                    <td className="px-4 py-4 text-xs font-medium text-text-primary">
+                      <span className="flex items-center gap-1.5">
+                        <div className="w-1.5 h-1.5 rounded-full bg-primary/40"></div>
+                        {r.location}
+                      </span>
+                    </td>
+                    <td className="px-4 py-4">
+                      <span className={`px-3 py-1.5 rounded-full text-xs font-bold border transition-all ${getStatusColor(r.status)}`}>
+                        {r.status}
+                      </span>
+                    </td>
+                    <td className="px-4 py-4 text-xs text-text-secondary">{r.date}</td>
+                  </motion.tr>
+                ))}
+              </AnimatePresence>
+
+              {allReports.length === 0 && (
+                <tr>
+                  <td colSpan="5" className="text-center py-20">
+                    <div className="flex flex-col items-center gap-3">
+                      <div className="p-4 bg-[var(--input-bg)] rounded-full text-text-secondary opacity-30"><Layers size={40} /></div>
+                      <p className="text-sm text-text-secondary">No reports match the current filter.</p>
+                    </div>
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {/* Resolve Proof Modal Interceptor */}
       <AnimatePresence>
