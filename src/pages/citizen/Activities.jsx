@@ -3,7 +3,7 @@ import { collection, query, orderBy, onSnapshot, doc, updateDoc, increment } fro
 import { db } from '../../firebase/config';
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import { motion } from 'framer-motion';
-import { Calendar, MapPin, Users, Navigation, HeartHandshake, Waves, Loader2 } from 'lucide-react';
+import { Calendar, MapPin, Users, Navigation, HeartHandshake, Waves, Loader2, Sparkles } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
@@ -18,6 +18,33 @@ L.Icon.Default.mergeOptions({
   iconRetinaUrl: markerIcon2x,
   shadowUrl: markerShadow,
 });
+
+const EVENT_TYPE_META = {
+  beach: {
+    label: 'Beach Cleanup',
+    glow: 'bg-blue-500',
+    badge: 'bg-blue-500/20 text-blue-400 border border-blue-500/30',
+    progress: 'bg-blue-500',
+    filterText: 'text-blue-400',
+    icon: Waves,
+  },
+  ngo: {
+    label: 'NGO Drive',
+    glow: 'bg-green-500',
+    badge: 'bg-green-500/20 text-green-400 border border-green-500/30',
+    progress: 'bg-green-500',
+    filterText: 'text-green-400',
+    icon: HeartHandshake,
+  },
+  special: {
+    label: 'Special Event',
+    glow: 'bg-amber-500',
+    badge: 'bg-amber-500/20 text-amber-400 border border-amber-500/30',
+    progress: 'bg-amber-500',
+    filterText: 'text-amber-400',
+    icon: Sparkles,
+  },
+};
 
 export default function Activities() {
   const [activeFilter, setActiveFilter] = useState('all');
@@ -67,6 +94,7 @@ export default function Activities() {
   const filteredActivities = activeFilter === 'all' 
     ? activities 
     : activities.filter(a => a.type === activeFilter);
+  const featuredSpecialEvents = activities.filter((a) => a.type === 'special' && a.featured);
 
   const centerPosition = [13.0400, 80.2600]; // Default map center
 
@@ -75,7 +103,7 @@ export default function Activities() {
       <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-10 gap-6">
         <div>
           <h1 className="text-3xl md:text-5xl font-extrabold text-text-primary tracking-tight mb-3">Nearby Activities</h1>
-          <p className="text-text-secondary text-lg max-w-2xl">Find local NGO events and beach cleanups. Get involved and make your city cleaner today.</p>
+          <p className="text-text-secondary text-lg max-w-2xl">Find local NGO events, beach cleanups, and special drives. Get involved and make your city cleaner today.</p>
         </div>
         
         {/* Filters */}
@@ -98,8 +126,31 @@ export default function Activities() {
           >
             <HeartHandshake className="w-4 h-4" /> NGO
           </button>
+          <button
+            onClick={() => setActiveFilter('special')}
+            className={`px-4 py-2 text-sm font-medium rounded-md transition-all flex items-center gap-2 ${activeFilter === 'special' ? 'bg-[var(--card-bg)] text-amber-400 shadow-sm border border-[var(--border-color)]' : 'text-text-secondary hover:text-text-primary'}`}
+          >
+            <Sparkles className="w-4 h-4" /> Special
+          </button>
         </div>
       </div>
+
+      {featuredSpecialEvents.length > 0 && activeFilter !== 'special' && (
+        <div className="mb-8 rounded-2xl border border-amber-500/40 bg-amber-500/10 p-4 md:p-5">
+          <div className="flex items-center gap-2 mb-3">
+            <Sparkles className="w-5 h-5 text-amber-300" />
+            <h2 className="text-lg font-bold text-amber-200">Featured Special Events</h2>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {featuredSpecialEvents.slice(0, 2).map((event) => (
+              <div key={event.id} className="rounded-xl border border-amber-400/30 bg-[var(--card-bg)]/70 p-3">
+                <p className="text-sm font-semibold text-text-primary">{event.title}</p>
+                <p className="text-xs text-text-secondary mt-1">{event.date} • {event.location}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         
@@ -123,14 +174,19 @@ export default function Activities() {
               className="glass-card p-6 rounded-2xl border border-[var(--border-color)] hover:border-gray-500 transition-all group relative overflow-hidden"
             >
                {/* Subtle background glow */}
-               <div className={`absolute top-0 right-0 w-64 h-64 rounded-full blur-[80px] opacity-10 pointer-events-none transition-all group-hover:opacity-20 ${activity.type === 'beach' ? 'bg-blue-500' : 'bg-green-500'}`} />
+               <div className={`absolute top-0 right-0 w-64 h-64 rounded-full blur-[80px] opacity-10 pointer-events-none transition-all group-hover:opacity-20 ${(EVENT_TYPE_META[activity.type] || EVENT_TYPE_META.ngo).glow}`} />
                
                <div className="flex justify-between items-start mb-4 relative z-10">
                  <div>
                    <div className="flex items-center gap-2 mb-2">
-                     <span className={`text-xs font-bold uppercase tracking-wider px-2 py-1 rounded-md ${activity.type === 'beach' ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30' : 'bg-green-500/20 text-green-400 border border-green-500/30'}`}>
-                       {activity.type === 'beach' ? 'Beach Cleanup' : 'NGO Drive'}
+                     <span className={`text-xs font-bold uppercase tracking-wider px-2 py-1 rounded-md ${(EVENT_TYPE_META[activity.type] || EVENT_TYPE_META.ngo).badge}`}>
+                       {(EVENT_TYPE_META[activity.type] || EVENT_TYPE_META.ngo).label}
                      </span>
+                     {activity.type === 'special' && activity.featured && (
+                       <span className="text-xs font-bold uppercase tracking-wider px-2 py-1 rounded-md bg-amber-400/20 text-amber-300 border border-amber-400/40">
+                         Featured
+                       </span>
+                     )}
                    </div>
                    <h3 className="text-xl font-bold text-text-primary leading-tight">{activity.title}</h3>
                    <span className="text-sm font-medium text-text-secondary flex items-center gap-1 mt-1">
@@ -164,7 +220,7 @@ export default function Activities() {
                    {/* Progress bar */}
                    <div className="w-full bg-[var(--border-color)] h-1.5 rounded-full mt-2">
                      <div 
-                       className={`h-full rounded-full ${activity.type === 'beach' ? 'bg-blue-500' : 'bg-green-500'}`} 
+                       className={`h-full rounded-full ${(EVENT_TYPE_META[activity.type] || EVENT_TYPE_META.ngo).progress}`} 
                        style={{ width: `${Math.min((activity.registered / activity.spots) * 100, 100)}%` }}
                      />
                    </div>

@@ -18,6 +18,7 @@ import CitizenDashboard from './pages/citizen/CitizenDashboard';
 import Activities from './pages/citizen/Activities';
 import TrackComplaint from './pages/citizen/TrackComplaint';
 import EducationHub from './pages/citizen/EducationHub';
+import CitizenChatbot from './components/citizen/CitizenChatbot';
 import NgoDashboard from './pages/ngo/NgoDashboard';
 import NgoProfile from './pages/ngo/NgoProfile';
 import { useTheme } from './context/ThemeContext';
@@ -63,6 +64,7 @@ function CitizenApp({ user, onLogout }) {
             <Route path="*" element={<Navigate to="dashboard" />} />
           </Routes>
         </main>
+        <CitizenChatbot />
         <Footer />
       </div>
     </ProtectedRoute>

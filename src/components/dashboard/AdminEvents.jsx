@@ -1,8 +1,29 @@
 import { useState, useEffect } from 'react';
 import { collection, addDoc, query, orderBy, onSnapshot, deleteDoc, doc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../../firebase/config';
-import { Calendar, MapPin, Users, HeartHandshake, Waves, Trash2, Plus, Loader2 } from 'lucide-react';
+import { Calendar, MapPin, Users, HeartHandshake, Waves, Trash2, Plus, Loader2, Sparkles } from 'lucide-react';
 import { motion } from 'framer-motion';
+
+const EVENT_TYPE_META = {
+  beach: {
+    label: 'Beach Cleanup',
+    border: 'bg-blue-500',
+    badge: 'bg-blue-500/20 text-blue-400',
+    icon: Waves,
+  },
+  ngo: {
+    label: 'NGO Drive',
+    border: 'bg-green-500',
+    badge: 'bg-green-500/20 text-green-400',
+    icon: HeartHandshake,
+  },
+  special: {
+    label: 'Special Event',
+    border: 'bg-amber-500',
+    badge: 'bg-amber-500/20 text-amber-400',
+    icon: Sparkles,
+  },
+};
 
 export default function AdminEvents() {
   const [events, setEvents] = useState([]);
@@ -19,6 +40,7 @@ export default function AdminEvents() {
   const [date, setDate] = useState('');
   const [location, setLocation] = useState('');
   const [spots, setSpots] = useState(50);
+  const [featuredSpecial, setFeaturedSpecial] = useState(false);
 
   const geocodeLocation = async (address) => {
     try {
@@ -64,6 +86,7 @@ export default function AdminEvents() {
         title,
         description,
         type,
+        featured: type === 'special' ? featuredSpecial : false,
         ngo,
         date: new Date(date).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }),
         location,
@@ -81,6 +104,7 @@ export default function AdminEvents() {
       setDate('');
       setLocation('');
       setSpots(50);
+      setFeaturedSpecial(false);
       
       setTimeout(() => setSuccess(''), 3000);
     } catch (err) {
@@ -126,6 +150,7 @@ export default function AdminEvents() {
                 <select value={type} onChange={e => setType(e.target.value)} className="w-full bg-[var(--input-bg)] border border-[var(--border-color)] rounded-xl px-3 py-2 text-sm text-text-primary focus:border-primary focus:outline-none">
                   <option value="ngo">NGO Drive</option>
                   <option value="beach">Beach Cleanup</option>
+                  <option value="special">Special Event</option>
                 </select>
               </div>
               <div>
@@ -154,6 +179,18 @@ export default function AdminEvents() {
               <textarea required value={description} onChange={e => setDescription(e.target.value)} rows="3" placeholder="Describe the activity..." className="w-full bg-[var(--input-bg)] border border-[var(--border-color)] rounded-xl px-3 py-2 text-sm text-text-primary focus:border-primary focus:outline-none resize-none" />
             </div>
 
+            {type === 'special' && (
+              <label className="flex items-center gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-300">
+                <input
+                  type="checkbox"
+                  checked={featuredSpecial}
+                  onChange={(e) => setFeaturedSpecial(e.target.checked)}
+                  className="h-4 w-4 accent-amber-500"
+                />
+                Mark as featured special event
+              </label>
+            )}
+
             <button type="submit" disabled={submitting} className="w-full py-3 bg-primary hover:bg-blue-600 text-white rounded-xl text-sm font-bold shadow-glow-primary transition-colors flex items-center justify-center gap-2 mt-4">
               {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Publish Event'}
             </button>
@@ -174,13 +211,18 @@ export default function AdminEvents() {
         ) : (
           events.map(activity => (
             <motion.div key={activity.id} initial={{opacity: 0, y: 10}} animate={{opacity: 1, y: 0}} className="glass-card p-5 rounded-2xl border border-[var(--border-color)] flex flex-col md:flex-row gap-5 relative overflow-hidden group">
-               <div className={`absolute left-0 top-0 bottom-0 w-1 ${activity.type === 'beach' ? 'bg-blue-500' : 'bg-green-500'}`} />
+               <div className={`absolute left-0 top-0 bottom-0 w-1 ${(EVENT_TYPE_META[activity.type] || EVENT_TYPE_META.ngo).border}`} />
                
                <div className="flex-grow">
                  <div className="flex items-center gap-2 mb-1">
-                   <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md ${activity.type === 'beach' ? 'bg-blue-500/20 text-blue-400' : 'bg-green-500/20 text-green-400'}`}>
-                     {activity.type === 'beach' ? 'Beach Cleanup' : 'NGO Drive'}
+                   <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md ${(EVENT_TYPE_META[activity.type] || EVENT_TYPE_META.ngo).badge}`}>
+                     {(EVENT_TYPE_META[activity.type] || EVENT_TYPE_META.ngo).label}
                    </span>
+                   {activity.type === 'special' && activity.featured && (
+                     <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-amber-400/20 text-amber-300 border border-amber-400/40">
+                       Featured
+                     </span>
+                   )}
                  </div>
                  <h3 className="text-lg font-bold text-text-primary mb-1">{activity.title}</h3>
                  <p className="text-sm text-text-secondary mb-3 pt-1">{activity.description}</p>
